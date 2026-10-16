@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
-import { OPENCODE_MODEL_DEFINITIONS } from "./models";
+import { OPENCODE_MODEL_DEFINITIONS, OPENCODE_WHITELIST_MODELS } from "./models.js";
 
 // =============================================================================
 // Types
@@ -21,12 +21,21 @@ export interface UpdateConfigResult {
 
 export interface OpencodeConfig {
   $schema?: string;
+  /** Legacy singular key (OpenCode v1). */
   plugin?: string[];
-  provider?: {
-    google?: {
-      models?: Record<string, unknown>;
-      [key: string]: unknown;
-    };
+  /** Native plural key (OpenCode v2). */
+  plugins?: string[];
+  /** Legacy singular key (OpenCode v1). */
+  provider?: ProviderSection;
+  /** Native plural key (OpenCode v2). */
+  providers?: ProviderSection;
+  [key: string]: unknown;
+}
+
+interface ProviderSection {
+  google?: {
+    models?: Record<string, unknown>;
+    whitelist?: string[];
     [key: string]: unknown;
   };
   [key: string]: unknown;
@@ -35,6 +44,13 @@ export interface OpencodeConfig {
 export interface UpdateConfigOptions {
   /** Override the config file path (for testing) */
   configPath?: string;
+  /**
+   * Write the legacy v1 `provider(s).google.models` + `whitelist` block.
+   * OpenCode v2 registers the Antigravity models natively via the model transform,
+   * so this legacy block is ignored by v2 and only produces "malformed" warnings.
+   * Default: true (v1 compatible). v2 callers pass false.
+   */
+  writeLegacyProviderModels?: boolean;
 }
 
 // =============================================================================
@@ -45,6 +61,94 @@ const PLUGIN_NAME = "opencode-antigravity-auth@latest";
 const SCHEMA_URL = "https://opencode.ai/config.json";
 const OPENCODE_JSON_FILENAME = "opencode.json";
 const OPENCODE_JSONC_FILENAME = "opencode.jsonc";
+export const ANTIGRAVITY_QUOTA_COMMAND_FILENAME = "antigravity-quota.md";
+export const ANTIGRAVITY_UPDATE_COMMAND_FILENAME = "antigravity-update.md";
+
+export const ANTIGRAVITY_QUOTA_COMMAND_CONTENT = `---
+description: Consultar estado de cuotas de Antigravity (5h y Semanal)
+---
+
+Use the \`antigravity_quota\` tool to check the current quota status.
+
+This will show:
+- API quota remaining for each model (Gemini 3 Pro, Flash, Claude via Antigravity)
+- Per-account breakdown with visual progress bars
+- Time until quota reset
+- Local rate limit cache status
+
+Just call the tool directly:
+\`\`\`
+antigravity_quota()
+\`\`\`
+
+IMPORTANT: Display the tool output EXACTLY as it is returned. Do not summarize, reformat, or modify the output in any way.
+`;
+
+export const ANTIGRAVITY_UPDATE_COMMAND_CONTENT = `---
+description: Actualizar plugin opencode-antigravity-auth a la última versión
+---
+
+Ejecuta la actualización del plugin de Antigravity en este entorno:
+
+1. Si el plugin está cargado como ruta local (ej. en /root/proyectos/opencode-antigravity-auth):
+   - Ve a ese directorio, haz \`git pull origin main\`, y luego compila con \`npm run build\`.
+   - Muestra la versión actualizada resultante de package.json.
+2. Si está cargado desde GitHub (\`github:JoshRob297/opencode-antigravity-auth\`):
+   - Informa al usuario que reinicie OpenCode para descargar la última versión de GitHub o limpia la caché con rm -rf ~/.cache/opencode/.
+`;
+
+/**
+ * Ensures the /antigravity-quota and /antigravity-update slash commands are installed in OpenCode's command directory.
+ *
+ * @param configDir - Optional custom config dir (for testing)
+ * @returns Path of the command file created or updated
+ */
+export function ensureAntigravityQuotaCommand(configDir?: string): string {
+  const dir = configDir ?? getOpencodeConfigDir();
+  const commandDir = join(dir, "command");
+  const quotaCommandPath = join(commandDir, ANTIGRAVITY_QUOTA_COMMAND_FILENAME);
+  const updateCommandPath = join(commandDir, ANTIGRAVITY_UPDATE_COMMAND_FILENAME);
+
+  try {
+    if (!existsSync(commandDir)) {
+      mkdirSync(commandDir, { recursive: true });
+    }
+    if (!existsSync(quotaCommandPath)) {
+      writeFileSync(quotaCommandPath, ANTIGRAVITY_QUOTA_COMMAND_CONTENT, "utf-8");
+    }
+    if (!existsSync(updateCommandPath)) {
+      writeFileSync(updateCommandPath, ANTIGRAVITY_UPDATE_COMMAND_CONTENT, "utf-8");
+    }
+  } catch {
+    // Best-effort creation, ignore permission issues
+  }
+
+  return quotaCommandPath;
+}
+
+/**
+ * OpenCode v2 (2.0+) uses the native plural keys `plugins`/`providers`, while
+ * v1 used the legacy singular `plugin`/`provider`. Detect which form the file
+ * already uses so we mutate it in place instead of introducing a conflicting
+ * key that the runtime would flag as a legacy/native conflict.
+ */
+export function resolvePluginKey(config: OpencodeConfig): "plugin" | "plugins" {
+  if (Array.isArray(config.plugins)) return "plugins";
+  if (Array.isArray(config.plugin)) return "plugin";
+  return "plugins";
+}
+
+export function resolveProviderKey(config: OpencodeConfig): "provider" | "providers" {
+  const providers = config.providers;
+  if (providers && typeof providers === "object" && !Array.isArray(providers)) {
+    return "providers";
+  }
+  const provider = config.provider;
+  if (provider && typeof provider === "object" && !Array.isArray(provider)) {
+    return "provider";
+  }
+  return "providers";
+}
 
 function stripJsonCommentsAndTrailingCommas(json: string): string {
   return json
@@ -93,7 +197,9 @@ export function getOpencodeConfigPath(): string {
  *
  * This function:
  * 1. Reads existing opencode.json/opencode.jsonc (or creates default structure)
- * 2. Replaces `provider.google.models` with plugin models
+ * 2. Replaces `provider(s).google.models` with plugin models, keeping whichever
+ *    of the legacy singular (`plugin`/`provider`) or native plural
+ *    (`plugins`/`providers`) key form the file already uses
  * 3. Writes back to disk with proper formatting
  *
  * Preserves:
@@ -117,11 +223,11 @@ export async function updateOpencodeConfig(
       const content = readFileSync(configPath, "utf-8");
       config = JSON.parse(stripJsonCommentsAndTrailingCommas(content)) as OpencodeConfig;
     } else {
-      // Create default config structure
+      // Create default config structure using native OpenCode v2 plural keys
       config = {
         $schema: SCHEMA_URL,
-        plugin: [],
-        provider: {},
+        plugins: [],
+        providers: {},
       };
     }
 
@@ -130,29 +236,48 @@ export async function updateOpencodeConfig(
       config.$schema = SCHEMA_URL;
     }
 
+    // Detect whether this file uses the legacy singular or native plural keys
+    // so we never write a conflicting key that OpenCode v2 would discard.
+    const pluginKey = resolvePluginKey(config);
+    const providerKey = resolveProviderKey(config);
+
     // Ensure plugin array exists and contains our plugin
-    if (!Array.isArray(config.plugin)) {
-      config.plugin = [];
+    if (!Array.isArray(config[pluginKey])) {
+      config[pluginKey] = [];
     }
+    const pluginList = config[pluginKey] as string[];
 
     // Check if plugin is already in the list (any version)
-    const hasPlugin = config.plugin.some((p) =>
-      p.includes("opencode-antigravity-auth")
+    const hasPlugin = pluginList.some((p) =>
+      typeof p === "string" && p.includes("opencode-antigravity-auth")
     );
     if (!hasPlugin) {
-      config.plugin.push(PLUGIN_NAME);
+      pluginList.push(PLUGIN_NAME);
     }
 
-    // Ensure provider.google structure exists
-    if (!config.provider) {
-      config.provider = {};
-    }
-    if (!config.provider.google) {
-      config.provider.google = {};
+    // Legacy v1 block: models + whitelist written into provider(s).google.
+    // In OpenCode v2 this is ignored (models are registered natively via the model
+    // transform), so the v2 caller opts out to avoid "malformed recognized value" warnings.
+    if (options.writeLegacyProviderModels !== false) {
+      // Ensure provider.google structure exists under the resolved key
+      if (!config[providerKey] || typeof config[providerKey] !== "object" || Array.isArray(config[providerKey])) {
+        config[providerKey] = {};
+      }
+      const providerSection = config[providerKey] as ProviderSection;
+      if (!providerSection.google || typeof providerSection.google !== "object") {
+        providerSection.google = {};
+      }
+      const googleSection = providerSection.google;
+
+      // Replace google models with plugin models
+      googleSection.models = { ...OPENCODE_MODEL_DEFINITIONS };
+
+      // Whitelist only official Antigravity models to hide 18+ unauthenticated native Google models
+      googleSection.whitelist = [...OPENCODE_WHITELIST_MODELS];
     }
 
-    // Replace google models with plugin models
-    config.provider.google.models = { ...OPENCODE_MODEL_DEFINITIONS };
+    // Automatically ensure /antigravity-quota command is installed
+    ensureAntigravityQuotaCommand(getOpencodeConfigDir());
 
     // Ensure config directory exists
     const configDir = dirname(configPath);

@@ -1,9 +1,10 @@
 # dependencies (bun install)
 node_modules
+bun.lock
+bun.lockb
 
 # output
 out
-dist
 *.tgz
 
 # code coverage
@@ -37,6 +38,9 @@ antigravity-debug-*.log
 # Hive workflow internal files
 .hive/
 
+# Local git worktrees
+.worktrees/
+
 # Test artifacts
 test-file.ts
 
@@ -45,3 +49,13 @@ CLIProxyAPI/
 LLM-API-Key-Proxy/
 opencode/
 opencode-better-antigravity-auth/
+
+# Secrets and credentials
+antigravity-accounts.json
+antigravity-oauth-token
+*.token
+*.key
+*.pem
+*.p12
+*.cer
+*.crt

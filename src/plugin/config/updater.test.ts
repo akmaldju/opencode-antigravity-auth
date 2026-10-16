@@ -2,7 +2,12 @@ import { describe, test, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { updateOpencodeConfig } from "./updater";
+import {
+  updateOpencodeConfig,
+  ensureAntigravityQuotaCommand,
+  ANTIGRAVITY_QUOTA_COMMAND_FILENAME,
+  ANTIGRAVITY_QUOTA_COMMAND_CONTENT,
+} from "./updater";
 import { OPENCODE_MODEL_DEFINITIONS } from "./models";
 
 describe("updateOpencodeConfig", () => {
@@ -37,14 +42,20 @@ describe("updateOpencodeConfig", () => {
     expect(result.configPath).toBe(configPath);
     expect(fs.existsSync(configPath)).toBe(true);
 
-    // Verify written config has correct structure
+    // Verify written config has correct structure (native v2 plural keys)
     const writtenConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     expect(writtenConfig.$schema).toBe("https://opencode.ai/config.json");
-    expect(writtenConfig.plugin).toContain("opencode-antigravity-auth@latest");
-    expect(writtenConfig.provider?.google?.models).toBeDefined();
+    expect(writtenConfig.plugins).toContain("opencode-antigravity-auth@latest");
+    expect(writtenConfig.providers?.google?.models).toBeDefined();
+    expect(writtenConfig.providers?.google?.whitelist).toBeDefined();
+    expect(writtenConfig.providers?.google?.whitelist).toContain("antigravity-gemini-3.8-flash");
+    expect(writtenConfig.providers?.google?.whitelist).not.toContain("antigravity-gemini-3.5-flash");
+    // No conflicting legacy key should be introduced
+    expect(writtenConfig.plugin).toBeUndefined();
+    expect(writtenConfig.provider).toBeUndefined();
   });
 
-  test("replaces existing google models with plugin models", async () => {
+  test("replaces existing google models with plugin models and updates whitelist", async () => {
     const existingConfig = {
       $schema: "https://opencode.ai/config.json",
       plugin: ["opencode-antigravity-auth@latest"],
@@ -53,6 +64,7 @@ describe("updateOpencodeConfig", () => {
           models: {
             "old-model": { name: "Old Model" },
           },
+          whitelist: ["old-model"],
         },
       },
     };
@@ -66,8 +78,12 @@ describe("updateOpencodeConfig", () => {
     // Old model should be replaced
     expect(writtenConfig.provider.google.models["old-model"]).toBeUndefined();
     // New models should be present
-    expect(writtenConfig.provider.google.models["antigravity-gemini-3-pro"]).toBeDefined();
+    expect(writtenConfig.provider.google.models["antigravity-gemini-3.8-flash"]).toBeDefined();
     expect(writtenConfig.provider.google.models["antigravity-claude-sonnet-4-6"]).toBeDefined();
+    expect(writtenConfig.provider.google.models["antigravity-gemini-3.5-flash"]).toBeUndefined();
+    // Whitelist should be updated
+    expect(writtenConfig.provider.google.whitelist).toContain("antigravity-gemini-3.8-flash");
+    expect(writtenConfig.provider.google.whitelist).not.toContain("old-model");
   });
 
   test("preserves non-google provider sections", async () => {
@@ -203,12 +219,59 @@ describe("updateOpencodeConfig", () => {
     expect(result.success).toBe(true);
 
     const writtenConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    const models = writtenConfig.provider.google.models;
+    const models = writtenConfig.providers.google.models;
 
     // Verify all models from OPENCODE_MODEL_DEFINITIONS are included
     for (const modelKey of Object.keys(OPENCODE_MODEL_DEFINITIONS)) {
       expect(models[modelKey]).toBeDefined();
     }
+  });
+
+  test("preserves native plural keys and does not introduce legacy singular keys", async () => {
+    const existingConfig = {
+      $schema: "https://opencode.ai/config.json",
+      plugins: ["opencode-antigravity-auth@latest", "other-plugin"],
+      providers: {
+        google: {
+          models: { "old-model": {} },
+          whitelist: ["old-model"],
+        },
+        commandcode: { models: {} },
+      },
+    };
+    fs.writeFileSync(configPath, JSON.stringify(existingConfig));
+
+    const result = await updateOpencodeConfig({ configPath });
+    expect(result.success).toBe(true);
+
+    const writtenConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    expect(writtenConfig.plugins).toContain("other-plugin");
+    expect(writtenConfig.providers.google.models["old-model"]).toBeUndefined();
+    expect(writtenConfig.providers.google.models["antigravity-gemini-3.8-flash"]).toBeDefined();
+    expect(writtenConfig.providers.google.whitelist).toContain("antigravity-gemini-3.8-flash");
+    expect(writtenConfig.providers.commandcode).toBeDefined();
+    // No conflicting legacy keys
+    expect(writtenConfig.plugin).toBeUndefined();
+    expect(writtenConfig.provider).toBeUndefined();
+  });
+
+  test("does not duplicate plugin in native plural plugins array", async () => {
+    const existingConfig = {
+      plugins: ["opencode-antigravity-auth@2.0.0"],
+      providers: {},
+    };
+    fs.writeFileSync(configPath, JSON.stringify(existingConfig));
+
+    const result = await updateOpencodeConfig({ configPath });
+    expect(result.success).toBe(true);
+
+    const writtenConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    const count = writtenConfig.plugins.filter(
+      (p: string) => p.includes("opencode-antigravity-auth")
+    ).length;
+    expect(count).toBe(1);
+    expect(writtenConfig.plugins).toContain("opencode-antigravity-auth@2.0.0");
+    expect(writtenConfig.plugin).toBeUndefined();
   });
 
   test("parses existing jsonc config files with comments and trailing commas", async () => {
@@ -235,7 +298,7 @@ describe("updateOpencodeConfig", () => {
     expect(writtenConfig.plugin).toContain("other-plugin");
     expect(writtenConfig.plugin).toContain("opencode-antigravity-auth@latest");
     expect(writtenConfig.provider.google.region).toBe("us-central1");
-    expect(writtenConfig.provider.google.models["antigravity-gemini-3-pro"]).toBeDefined();
+    expect(writtenConfig.provider.google.models["antigravity-gemini-3.8-flash"]).toBeDefined();
   });
 
   test("prefers existing opencode.jsonc when using default config path", async () => {
@@ -302,5 +365,22 @@ describe("updateOpencodeConfig", () => {
     expect(writtenConfig.provider.google.customSetting).toBe(true);
     // But models should be replaced
     expect(writtenConfig.provider.google.models["old-model"]).toBeUndefined();
+  });
+
+  test("ensureAntigravityQuotaCommand installs /antigravity-quota.md in command directory", () => {
+    const customConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), "opencode-cmd-test-"));
+    const createdPath = ensureAntigravityQuotaCommand(customConfigDir);
+
+    expect(createdPath).toBe(path.join(customConfigDir, "command", ANTIGRAVITY_QUOTA_COMMAND_FILENAME));
+    expect(fs.existsSync(createdPath)).toBe(true);
+
+    const content = fs.readFileSync(createdPath, "utf-8");
+    expect(content).toBe(ANTIGRAVITY_QUOTA_COMMAND_CONTENT);
+    expect(content).toContain("antigravity_quota()");
+
+    // Calling it again should preserve the existing file without throwing
+    expect(() => ensureAntigravityQuotaCommand(customConfigDir)).not.toThrow();
+
+    fs.rmSync(customConfigDir, { recursive: true, force: true });
   });
 });

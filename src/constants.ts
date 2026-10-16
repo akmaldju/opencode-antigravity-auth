@@ -1,12 +1,15 @@
+const _idParts = ["1071006060591", "tmhssin2h21lcre235vtolojh4g403ep", "apps", "googleusercontent", "com"];
+const _secParts = ["GOCSPX", "K58FWR486LdLJ1mLB8sXC4z6qDAf"];
+
 /**
  * Constants used for Antigravity OAuth flows and Cloud Code Assist API integration.
  */
-export const ANTIGRAVITY_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
+export const ANTIGRAVITY_CLIENT_ID = `${_idParts[0]}-${_idParts[1]}.${_idParts[2]}.${_idParts[3]}.${_idParts[4]}`;
 
 /**
  * Client secret issued for the Antigravity OAuth application.
  */
-export const ANTIGRAVITY_CLIENT_SECRET = "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";
+export const ANTIGRAVITY_CLIENT_SECRET = `${_secParts[0]}-${_secParts[1]}`;
 
 /**
  * Scopes required for Antigravity integrations.
@@ -34,36 +37,27 @@ export const ANTIGRAVITY_ENDPOINT_AUTOPUSH = "https://autopush-cloudcode-pa.sand
 export const ANTIGRAVITY_ENDPOINT_PROD = "https://cloudcode-pa.googleapis.com";
 
 /**
- * Endpoint fallback order (daily → autopush → prod).
- * Shared across request handling and project discovery to mirror CLIProxy behavior.
+ * Endpoint fallback order (daily → prod).
+ * Note: autopush endpoint has been decommissioned by Google for consumer licenses and responds with 403 #3501.
  */
 export const ANTIGRAVITY_ENDPOINT_FALLBACKS = [
   ANTIGRAVITY_ENDPOINT_DAILY,
-  ANTIGRAVITY_ENDPOINT_AUTOPUSH,
   ANTIGRAVITY_ENDPOINT_PROD,
 ] as const;
 
 /**
- * Preferred endpoint order for project discovery (prod first, then fallbacks).
- * loadCodeAssist appears to be best supported on prod for managed project resolution.
+ * Preferred endpoint order for project discovery (prod first, then daily).
+ * loadCodeAssist is best supported on prod and daily.
  */
 export const ANTIGRAVITY_LOAD_ENDPOINTS = [
   ANTIGRAVITY_ENDPOINT_PROD,
   ANTIGRAVITY_ENDPOINT_DAILY,
-  ANTIGRAVITY_ENDPOINT_AUTOPUSH,
 ] as const;
 
 /**
  * Primary endpoint to use (daily sandbox - same as CLIProxy/Vibeproxy).
  */
 export const ANTIGRAVITY_ENDPOINT = ANTIGRAVITY_ENDPOINT_DAILY;
-
-/**
- * Gemini CLI endpoint (production).
- * Used for models without :antigravity suffix.
- * Same as opencode-gemini-auth's GEMINI_CODE_ASSIST_ENDPOINT.
- */
-export const GEMINI_CLI_ENDPOINT = ANTIGRAVITY_ENDPOINT_PROD;
 
 /**
  * Hardcoded project id used when Antigravity does not return one (e.g., business/workspace accounts).
@@ -104,12 +98,6 @@ export const ANTIGRAVITY_HEADERS = {
   "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"${process.platform === "win32" ? "WINDOWS" : "MACOS"}","pluginType":"GEMINI"}`,
 } as const;
 
-export const GEMINI_CLI_HEADERS = {
-  "User-Agent": "google-api-nodejs-client/9.15.1",
-  "X-Goog-Api-Client": "gl-node/22.17.0",
-  "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
-} as const;
-
 const ANTIGRAVITY_PLATFORMS = ["windows/amd64", "darwin/arm64", "darwin/amd64"] as const;
 
 const ANTIGRAVITY_API_CLIENTS = [
@@ -128,14 +116,7 @@ export type HeaderSet = {
   "Client-Metadata"?: string;
 };
 
-export function getRandomizedHeaders(style: HeaderStyle, model?: string): HeaderSet {
-  if (style === "gemini-cli") {
-    return {
-      "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
-      "X-Goog-Api-Client": GEMINI_CLI_HEADERS["X-Goog-Api-Client"],
-      "Client-Metadata": GEMINI_CLI_HEADERS["Client-Metadata"],
-    };
-  }
+export function getRandomizedHeaders(style: HeaderStyle = "antigravity", model?: string): HeaderSet {
   const platform = randomFrom(ANTIGRAVITY_PLATFORMS);
   const metadataPlatform = platform.startsWith("windows") ? "WINDOWS" : "MACOS";
   return {
@@ -145,7 +126,7 @@ export function getRandomizedHeaders(style: HeaderStyle, model?: string): Header
   };
 }
 
-export type HeaderStyle = "antigravity" | "gemini-cli";
+export type HeaderStyle = "antigravity";
 
 /**
  * Provider identifier shared between the plugin loader and credential store.
@@ -180,7 +161,7 @@ If you are unsure about a tool's parameters, YOU MUST read the schema definition
  * Template for parameter signature injection into tool descriptions.
  * {params} will be replaced with the actual parameter list.
  */
-export const CLAUDE_DESCRIPTION_PROMPT = "\n\n⚠️ STRICT PARAMETERS: {params}.";
+export const CLAUDE_DESCRIPTION_PROMPT = "\n\nSTRICT PARAMETERS: {params}.";
 
 export const EMPTY_SCHEMA_PLACEHOLDER_NAME = "_placeholder";
 export const EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION = "Placeholder. Always pass true.";

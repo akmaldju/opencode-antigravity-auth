@@ -110,7 +110,7 @@ function createLogWriter(filePath?: string): (line: string) => void {
   }
 
   try {
-    const stream = createWriteStream(filePath, { flags: "a" });
+    const stream = createWriteStream(filePath, { flags: "a", mode: 0o600 });
     stream.on("error", () => {});
     return (line: string) => {
       const timestamp = new Date().toISOString();

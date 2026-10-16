@@ -2434,7 +2434,7 @@ export function validateAndFixClaudeToolPairing(messages: any[]): any[] {
 
   // Third: Nuclear option - remove orphaned tool_use entirely
   // This should rarely happen, but provides defense in depth
-  console.warn("[antigravity] fixClaudeToolPairing left orphans, applying nuclear option", {
+  log.warn("[antigravity] fixClaudeToolPairing left orphans, applying nuclear option", {
     orphanIds: [...orphanIds],
   });
 
@@ -2518,7 +2518,7 @@ function formatTypeHint(propData: Record<string, unknown>, depth = 0): string {
  */
 export function injectParameterSignatures(
   tools: any[],
-  promptTemplate = "\n\n⚠️ STRICT PARAMETERS: {params}.",
+  promptTemplate = "\n\nSTRICT PARAMETERS: {params}.",
 ): any[] {
   if (!tools || !Array.isArray(tools)) return tools;
 
@@ -2696,12 +2696,14 @@ export function matchResponseIdsToContents(
 }
 
 /**
- * Applies all tool fixes to a request payload for Claude models.
+ * Applies all tool fixes to a request payload.
  * This includes:
  * 1. Tool ID assignment for functionCalls
  * 2. Response ID matching for functionResponses
  * 3. Orphan recovery via fixToolResponseGrouping
  * 4. Claude format pairing fix via validateAndFixClaudeToolPairing
+ * 
+ * Works for BOTH Gemini (contents[]) and Claude (messages[]) formats.
  * 
  * @param payload - Request payload object
  * @param isClaude - Whether this is a Claude model request
@@ -2714,11 +2716,8 @@ export function applyToolPairingFixes(
   let contentsFixed = false;
   let messagesFixed = false;
 
-  if (!isClaude) {
-    return { contentsFixed, messagesFixed };
-  }
-
-  // Fix Gemini format (contents[])
+  // Fix Gemini format (contents[]) - applies to both Gemini and Claude requests
+  // since Claude requests may also carry Gemini-style contents in wrapped bodies.
   if (Array.isArray(payload.contents)) {
     // First pass: assign IDs to functionCalls
     const { contents: contentsWithIds, pendingCallIdsByName } = assignToolIdsToContents(
@@ -2738,7 +2737,7 @@ export function applyToolPairingFixes(
   }
 
   // Fix Claude format (messages[])
-  if (Array.isArray(payload.messages)) {
+  if (isClaude && Array.isArray(payload.messages)) {
     payload.messages = validateAndFixClaudeToolPairing(payload.messages as any[]);
     messagesFixed = true;
 
@@ -2748,6 +2747,86 @@ export function applyToolPairingFixes(
   }
 
   return { contentsFixed, messagesFixed };
+}
+
+/**
+ * Sanitizes a Gemini-style contents array so it does NOT end with a model turn.
+ *
+ * The Antigravity backend rejects requests whose history ends with a model
+ * turn that contains a functionCall without a matching functionResponse
+ * (HTTP 400 "Requests ending with a model turn are not supported").
+ *
+ * This happens after interrupted tool executions (ESC, aborted subagents,
+ * parallel sessions) where the last assistant message keeps a dangling
+ * tool call. The fix reuses the existing orphan-recovery pipeline:
+ * 1. Assign deterministic IDs to any functionCalls missing them
+ * 2. Match existing functionResponses to their calls
+ * 3. Inject placeholder functionResponses for still-pending calls
+ *
+ * @param contents - Gemini-style contents array
+ * @param force - When true, also drop trailing model turns that contain NO
+ * functionCall (pure text/thinking). Used on retry after the backend already
+ * rejected the request with "Requests ending with a model turn are not supported".
+ * @returns Sanitized contents that no longer end with an orphaned model turn
+ */
+export function sanitizeEndingModelTurn(contents: any[], force = false): any[] {
+  if (!Array.isArray(contents) || contents.length === 0) {
+    return contents;
+  }
+
+  const last = contents[contents.length - 1];
+  if (!last || typeof last !== "object") {
+    return contents;
+  }
+
+  const role = (last as { role?: unknown }).role;
+  if (role !== "model" && role !== "assistant") {
+    return contents;
+  }
+
+  const parts = Array.isArray((last as { parts?: unknown }).parts)
+    ? (last as { parts: any[] }).parts
+    : [];
+  const hasFunctionCall = parts.some(
+    (p: any) => p && typeof p === "object" && p.functionCall
+  );
+  if (!hasFunctionCall && !force) {
+    return contents;
+  }
+
+  const payload: Record<string, unknown> = { contents: [...contents] };
+  applyToolPairingFixes(payload, false);
+
+  let fixed = Array.isArray(payload.contents) ? payload.contents : contents;
+
+  // Last-resort guarantee: if we still end with a model turn (holding a
+  // functionCall, or any model turn when force=true), drop trailing turns
+  // until the history ends with a user turn so the request is accepted.
+  const isTrailingModelTurn = (c: any): boolean =>
+    !!c && (c.role === "model" || c.role === "assistant");
+
+  if (hasFunctionCall && !isTrailingModelTurn(fixed[fixed.length - 1])) {
+    return fixed;
+  }
+
+  if ((hasFunctionCall || force) && isTrailingModelTurn(fixed[fixed.length - 1])) {
+    log.debug("sanitizeEndingModelTurn: dropping trailing orphan model turn", {
+      lastRole: fixed[fixed.length - 1]?.role,
+      force,
+    });
+    const lastIdx = fixed.length - 1;
+    // Drop the trailing model turn AND any model-only tail (e.g., consecutive
+    // model turns without a user turn in between).
+    while (fixed.length > 0 && isTrailingModelTurn(fixed[fixed.length - 1])) {
+      fixed = fixed.slice(0, -1);
+    }
+    // Avoid duplicate drop if nothing changed
+    if (fixed.length === lastIdx) {
+      return fixed;
+    }
+  }
+
+  return fixed;
 }
 
 // ============================================================================

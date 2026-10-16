@@ -27,6 +27,7 @@ export const GITIGNORE_ENTRIES = [
   "antigravity-accounts.json",
   "antigravity-accounts.json.*.tmp",
   "antigravity-signature-cache.json",
+  "antigravity-stats.json",
   "antigravity-logs/",
 ];
 
@@ -200,7 +201,7 @@ export interface AccountMetadataV3 {
   verificationRequiredReason?: string;
   verificationUrl?: string;
   /** Cached soft quota data */
-  cachedQuota?: Record<string, { remainingFraction?: number; resetTime?: string; modelCount: number }>;
+  cachedQuota?: Partial<Record<string, { remainingFraction?: number; resetTime?: string; modelCount?: number }>>;
   cachedQuotaUpdatedAt?: number;
 }
 
@@ -421,10 +422,7 @@ function mergeAccountStorage(
           // Preserve manually configured projectId/managedProjectId if not in incoming
           projectId: acc.projectId ?? existingAcc.projectId,
           managedProjectId: acc.managedProjectId ?? existingAcc.managedProjectId,
-          rateLimitResetTimes: {
-            ...existingAcc.rateLimitResetTimes,
-            ...acc.rateLimitResetTimes,
-          },
+          rateLimitResetTimes: acc.rateLimitResetTimes ?? existingAcc.rateLimitResetTimes,
           lastUsed: Math.max(existingAcc.lastUsed || 0, acc.lastUsed || 0),
         });
       } else {

@@ -223,6 +223,32 @@ export const AntigravityConfigSchema = z.object({
    * @default false
    */
   claude_prompt_auto_caching: z.boolean().default(false),
+
+  /**
+   * Gemini safety filtering level:
+   * - "medium" (Default): Google native baseline (BLOCK_MEDIUM_AND_ABOVE). Max account safety.
+   * - "high": Technical coding & debugging (BLOCK_ONLY_HIGH). Reduces false positives.
+   * - "none": Permissive / Pentesting (BLOCK_NONE + JAILBREAK). Use at your own risk.
+   *
+   * @default "medium"
+   */
+  safety_level: z.enum(["medium", "high", "none"]).default("medium"),
+  
+  /**
+   * Safety Shield & Telemetry configuration:
+   * Monitors Google safetyRatings (probability: HIGH / MEDIUM) in responses.
+   */
+  safety_shield: z.object({
+    enabled: z.boolean().default(true),
+    log_ratings: z.boolean().default(true),
+    show_toast: z.boolean().default(true),
+    auto_rotate_threshold: z.number().min(0).max(10).default(2), // 0 disables auto-rotate
+  }).default({
+    enabled: true,
+    log_ratings: true,
+    show_toast: true,
+    auto_rotate_threshold: 2,
+  }),
   
   // =========================================================================
   // Proactive Token Refresh (ported from LLM-API-Key-Proxy)
@@ -267,6 +293,16 @@ export const AntigravityConfigSchema = z.object({
    * @default 300 (5 minutes)
    */
   max_rate_limit_wait_seconds: z.number().min(0).max(3600).default(300),
+
+  /**
+   * Maximum cumulative time in seconds to spend waiting across all retries
+   * when all accounts are blocked before terminating with a clear model-switch invitation.
+   * 
+   * Set to 0 to disable (rely solely on max_rate_limit_wait_seconds).
+   * 
+   * @default 120 (2 minutes)
+   */
+  max_all_blocked_wait_seconds: z.number().min(0).max(3600).default(120),
   
   /**
    * @deprecated Kept only for backward compatibility.
@@ -286,6 +322,21 @@ export const AntigravityConfigSchema = z.object({
    * @default false
    */
   cli_first: z.boolean().default(false),
+  
+  /**
+   * Register the models the backend reports for the active account, in addition
+   * to the curated catalog.
+   *
+   * The Antigravity backend returns a per-account model list. With this enabled,
+   * models an account actually has (for example the Gemini 4 "Argon" line) are
+   * registered automatically, instead of waiting for this plugin to hardcode
+   * them. Ids known to be dead, retired or internal are filtered out.
+   *
+   * Off by default: enabling it changes the visible model list.
+   *
+   * @default false
+   */
+  model_discovery: z.boolean().default(false),
   
   /**
    * Strategy for selecting accounts when making requests.
@@ -319,14 +370,14 @@ export const AntigravityConfigSchema = z.object({
     /**
      * Scheduling mode for rate limit behavior.
      * 
-     * - `cache_first`: Wait for same account to recover (preserves prompt cache). Default.
-     * - `balance`: Switch account immediately on rate limit. Maximum availability.
+     * - `balance`: Switch account immediately on rate limit. Maximum availability (Default).
+     * - `cache_first`: Wait for same account to recover (preserves prompt cache).
      * - `performance_first`: Round-robin distribution for maximum throughput.
      * 
      * Env override: OPENCODE_ANTIGRAVITY_SCHEDULING_MODE
-     * @default "cache_first"
+     * @default "balance"
      */
-    scheduling_mode: SchedulingModeSchema.default('cache_first'),
+    scheduling_mode: SchedulingModeSchema.default('balance'),
     
     /**
      * Maximum seconds to wait for same account in cache_first mode.
@@ -453,23 +504,32 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   debug_tui: false,
   keep_thinking: false,
   session_recovery: true,
-  auto_resume: true,
+  auto_resume: false,
   resume_text: "continue",
   empty_response_max_attempts: 4,
   empty_response_retry_delay_ms: 2000,
   tool_id_recovery: true,
   claude_tool_hardening: true,
   claude_prompt_auto_caching: false,
+  safety_level: "medium",
+  safety_shield: {
+    enabled: true,
+    log_ratings: true,
+    show_toast: true,
+    auto_rotate_threshold: 2,
+  },
   proactive_token_refresh: true,
   proactive_refresh_buffer_seconds: 1800,
   proactive_refresh_check_interval_seconds: 300,
   max_rate_limit_wait_seconds: 300,
+  max_all_blocked_wait_seconds: 120,
   quota_fallback: false,
   cli_first: false,
+  model_discovery: false,
   account_selection_strategy: 'hybrid',
   pid_offset_enabled: false,
   switch_on_first_rate_limit: true,
-  scheduling_mode: 'cache_first',
+  scheduling_mode: 'balance',
   max_cache_first_wait_seconds: 60,
   failure_ttl_seconds: 3600,
   default_retry_after_seconds: 60,
