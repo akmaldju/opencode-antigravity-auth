@@ -91,7 +91,7 @@ description: Actualizar plugin opencode-antigravity-auth a la última versión
 Ejecuta la actualización del plugin de Antigravity en este entorno:
 
 1. Si el plugin está cargado como ruta local (ej. en /root/proyectos/opencode-antigravity-auth):
-   - Ve a ese directorio, haz \`git pull origin main\`, y luego compila con \`npm run build\`.
+   - Ve a ese directorio, haz \`git pull origin main\`, y luego compila con \`npm run compile\`.
    - Muestra la versión actualizada resultante de package.json.
 2. Si está cargado desde GitHub (\`github:akmaldju/opencode-antigravity-auth\`):
    - Informa al usuario que reinicie OpenCode para descargar la última versión de GitHub o limpia la caché con rm -rf ~/.cache/opencode/.

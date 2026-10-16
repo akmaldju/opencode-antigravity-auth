@@ -18,7 +18,7 @@
 - install:   npm ci
 - typecheck: npm run typecheck
 - test:      npm test
-- build:     npm run build
+- compile:   npm run compile
 
 ## Invariants
 - The provider/plugin interface consumed by OpenCode is public. Do not rename, remove or
@@ -30,7 +30,7 @@
 
 ## Committed artifacts
 - `dist/` is committed and CI verifies it is in sync with `src/`. After any `src/` change run
-  `npm run build` and commit the regenerated `dist/` in the same PR.
+  `npm run compile` and commit the regenerated `dist/` in the same PR.
 
 ## Gotchas
 - Tests mock `./token` (refresh-queue). Do not rely on real network access in tests.

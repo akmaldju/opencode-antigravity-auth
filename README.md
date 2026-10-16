@@ -138,7 +138,7 @@ Clone and reference locally:
 
 ```bash
 git clone https://github.com/akmaldju/opencode-antigravity-auth.git /path/to/plugin
-cd /path/to/plugin && npm install && npm run build
+cd /path/to/plugin && npm install && npm run compile
 ```
 
 Then in `~/.config/opencode/opencode.json`:

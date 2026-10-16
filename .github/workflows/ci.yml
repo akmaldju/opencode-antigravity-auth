@@ -47,10 +47,10 @@ jobs:
         continue-on-error: true
         run: |
           set -e
-          npm run build 2>&1 | tee /tmp/build.log
+          npm run compile 2>&1 | tee /tmp/build.log
           git add -f dist
           if ! git diff --cached --exit-code -- dist; then
-            echo "::error::committed dist/ is out of sync with src/ - run 'npm run build' and commit the result."
+            echo "::error::committed dist/ is out of sync with src/ - run 'npm run compile' and commit the result."
             exit 1
           fi
 
