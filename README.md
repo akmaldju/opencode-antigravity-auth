@@ -1,13 +1,13 @@
 # Antigravity OAuth Plugin for OpenCode (Revived & Extended)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![CI](https://github.com/JoshRob297/opencode-antigravity-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/JoshRob297/opencode-antigravity-auth/actions/workflows/ci.yml)
+[![CI](https://github.com/akmaldju/opencode-antigravity-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/akmaldju/opencode-antigravity-auth/actions/workflows/ci.yml)
 
 > [!NOTE]
-> **Community Revival & Extended Edition**: This repository is an active, open-source continuation of the archived project by [NoeFabris](https://github.com/NoeFabris/opencode-antigravity-auth) (and earlier work by [@jenslys](https://github.com/jenslys) and [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)). It fixes critical upstream bugs and unlocks the newest Google Antigravity models.
+> **akmaldju fork (self-maintained)**: A personal, self-maintained fork of the archived original by [NoeFabris](https://github.com/NoeFabris/opencode-antigravity-auth) (earlier work by [@jenslys](https://github.com/jenslys) and [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)). Its OpenCode v2 port and current-backend fixes are vendored, with attribution, from the community revival by [JoshRob297](https://github.com/JoshRob297/opencode-antigravity-auth) — see [NOTICE](NOTICE). Kept under our own control instead of depending on upstream releases.
 
 > [!IMPORTANT]
-> **Project Status (October 2026) - maintenance paused.**
+> **Upstream revival status (October 2026) - paused over there; this fork continues as needed.**
 > After extended real-world use we are pausing new plugin work until Google ships a model that is genuinely worth paying for:
 > - **Gemini 4 ("Argon") integration is not planned and not implemented.** On **2026-10-13** Google released Argon, but the Antigravity backend exposes it only to **Google AI Ultra / Enterprise** accounts - not to Google AI Pro or free-tier. We hold no account of that type, so the integration could neither be built nor verified end to end, and this project does not ship untested model support.
 > - **Paying the Ultra / Enterprise difference for Argon is not worth it today.** Argon has not demonstrated the value Google claims: on real repository work we cannot reproduce a quality gain over the current workhorse that justifies a frontier-tier price, and paying the tier would still not fix the Antigravity backend, which keeps treating the account as `free-tier`.
@@ -21,7 +21,7 @@
 
 ---
 
-### What's New & Changed in this Fork (v2.0.0)
+### What's New & Changed in the Vendored v2.0.0 Line
 
 > *Release notes for the v2.0.0 line.* Model availability described below reflects the state at that time. Since **2026-10-13**, **Gemini 3.7 Flash, 3.6 Flash and 3.1 Pro are Ultra / Enterprise-only** and were pruned from the consumer catalog in **v2.0.4**; see [Models](#models) for the current catalog and the project status note above for the Argon decision.
 
@@ -126,7 +126,7 @@ Add to `plugins` in `~/.config/opencode/opencode.json`:
 
 ```json
 {
-  "plugins": ["github:JoshRob297/opencode-antigravity-auth"]
+  "plugins": ["github:akmaldju/opencode-antigravity-auth"]
 }
 ```
 
@@ -137,7 +137,7 @@ Add to `plugins` in `~/.config/opencode/opencode.json`:
 Clone and reference locally:
 
 ```bash
-git clone https://github.com/JoshRob297/opencode-antigravity-auth.git /path/to/plugin
+git clone https://github.com/akmaldju/opencode-antigravity-auth.git /path/to/plugin
 cd /path/to/plugin && npm install && npm run build
 ```
 
@@ -157,7 +157,7 @@ Then in `~/.config/opencode/opencode.json`:
 
    ```json
    {
-     "plugins": ["github:JoshRob297/opencode-antigravity-auth"]
+     "plugins": ["github:akmaldju/opencode-antigravity-auth"]
    }
    ```
 
@@ -201,7 +201,7 @@ In OpenCode v2 this is **not required** because the plugin registers all models 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["github:JoshRob297/opencode-antigravity-auth"],
+  "plugins": ["github:akmaldju/opencode-antigravity-auth"],
   "providers": {
     "google": {
       "models": {
@@ -417,7 +417,7 @@ Invalid JSON payload received. Unknown name "parameters" at 'request.tools[0]'
 **Solutions:**
 1. **Update to latest release from GitHub:**
    ```json
-   { "plugins": ["github:JoshRob297/opencode-antigravity-auth"] }
+   { "plugins": ["github:akmaldju/opencode-antigravity-auth"] }
    ```
 
 2. **Disable MCP servers** one-by-one to find the problematic one
@@ -448,7 +448,7 @@ This usually means an MCP tool name starts with a number (for example, a 1mcp ke
 **Diagnosis:**
 1. Disable all MCP servers in your config
 2. Enable one-by-one until error reappears
-3. Report the specific MCP in a [GitHub issue](https://github.com/JoshRob297/opencode-antigravity-auth/issues)
+3. Report the specific MCP in a [GitHub issue](https://github.com/akmaldju/opencode-antigravity-auth/issues)
 
 ---
 
@@ -576,7 +576,7 @@ In OpenCode v2, use the native plural key:
 
 ```json
 {
-  "plugins": ["github:JoshRob297/opencode-antigravity-auth"]
+  "plugins": ["github:akmaldju/opencode-antigravity-auth"]
 }
 ```
 
@@ -605,7 +605,7 @@ DCP creates synthetic assistant messages that lack thinking blocks. **List this 
 ```json
 {
   "plugins": [
-    "github:JoshRob297/opencode-antigravity-auth",
+    "github:akmaldju/opencode-antigravity-auth",
     "@tarquinen/opencode-dcp@latest"
   ]
 }
@@ -640,7 +640,7 @@ Create `~/.config/opencode/antigravity.json` for optional settings:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/JoshRob297/opencode-antigravity-auth/main/assets/antigravity.schema.json"
+  "$schema": "https://raw.githubusercontent.com/akmaldju/opencode-antigravity-auth/main/assets/antigravity.schema.json"
 }
 ```
 
@@ -743,6 +743,7 @@ This project stands on the shoulders of the open-source community:
   - [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)
   - [@dopesalmon](https://x.com/dopesalmon)
 - **Revival Maintainer**: [JoshRob297](https://github.com/JoshRob297) — v1.7.0+ maintenance, Gemini 3.7 Flash support & IAM 403 fixes.
+- **This Fork (akmaldju)**: vendored snapshot of the revival at commit `9ffdb3e`, plus fork-identity changes; provenance in [NOTICE](NOTICE).
 
 ## License
 

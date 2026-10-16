@@ -1,0 +1,16 @@
+# Provenance and attribution
+
+This repository is a personal fork under `akmaldju`, kept under our own control.
+
+It is built from:
+
+- **Original project** — `opencode-antigravity-auth` by Jens and NoeFabris
+  (https://github.com/NoeFabris/opencode-antigravity-auth), MIT licensed, now archived.
+- **Community revival (vendored)** — the OpenCode v2 port, current-backend
+  compatibility fixes, and much of the applied source in this fork are adapted
+  from https://github.com/JoshRob297/opencode-antigravity-auth (MIT), vendored
+  at commit `9ffdb3e` and no longer used as a runtime dependency.
+
+The original MIT license and copyright notices are preserved in
+`LICENSE`. Modifications made in this fork are released under the same MIT
+license.
