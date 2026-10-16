@@ -8,6 +8,9 @@
  */
 
 import type { RequestPayload, ThinkingConfig, ThinkingTier, GoogleSearchConfig } from "./types";
+import { createLogger } from "../logger";
+
+const log = createLogger("gemini-transform");
 
 /**
  * Transform a JSON Schema to Gemini-compatible format.
@@ -105,10 +108,8 @@ export function toGeminiSchema(schema: unknown): unknown {
           result[key] = validRequired;
         }
         // If no valid required properties, omit the required field entirely
-      } else {
-        // If there are no properties, keep required as-is (might be a schema without properties)
-        result[key] = value;
       }
+      // If there are no properties at all, omit required entirely to prevent API rejection
     } else {
       result[key] = value;
     }
@@ -215,7 +216,7 @@ export function buildImageGenerationConfig(): ImageConfig {
     return { aspectRatio };
   }
 
-  console.warn(`[gemini] Invalid aspect ratio "${aspectRatio}". Using default "1:1". Valid values: ${VALID_ASPECT_RATIOS.join(", ")}`);
+  log.warn(`Invalid aspect ratio "${aspectRatio}". Using default "1:1". Valid values: ${VALID_ASPECT_RATIOS.join(", ")}`);
 
   // Default to 1:1 square aspect ratio
   return { aspectRatio: "1:1" };
@@ -503,10 +504,11 @@ export function wrapToolsAsFunctionDeclarations(payload: RequestPayload): WrapTo
     if (tool.functionDeclarations) {
       if (Array.isArray(tool.functionDeclarations)) {
         for (const decl of tool.functionDeclarations as Array<Record<string, unknown>>) {
+          const rawParams = (decl.parameters as Record<string, unknown>) || { type: "OBJECT", properties: {} };
           functionDeclarations.push({
             name: String(decl.name || `tool-${functionDeclarations.length}`),
             description: String(decl.description || ""),
-            parameters: (decl.parameters as Record<string, unknown>) || { type: "OBJECT", properties: {} },
+            parameters: (toGeminiSchema(rawParams) as Record<string, unknown>) || { type: "OBJECT", properties: {} },
           });
         }
       }
@@ -545,7 +547,7 @@ export function wrapToolsAsFunctionDeclarations(payload: RequestPayload): WrapTo
     functionDeclarations.push({
       name,
       description,
-      parameters: schema,
+      parameters: (toGeminiSchema(schema) as Record<string, unknown>) || { type: "OBJECT", properties: {} },
     });
   }
 
@@ -564,8 +566,8 @@ export function wrapToolsAsFunctionDeclarations(payload: RequestPayload): WrapTo
     finalTools.push({ googleSearch: {} });
   } else if (hasWebSearchTool && functionDeclarations.length > 0) {
     // Log warning: web search requested but can't be used with functions
-    console.warn(
-      "[gemini] web_search tool detected but cannot be combined with function declarations. " +
+    log.warn(
+      "web_search tool detected but cannot be combined with function declarations. " +
       "Use the explicit google_search() tool call instead."
     );
   }

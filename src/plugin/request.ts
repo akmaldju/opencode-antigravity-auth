@@ -1,8 +1,6 @@
 import crypto from "node:crypto";
 import {
   ANTIGRAVITY_ENDPOINT,
-  GEMINI_CLI_ENDPOINT,
-  GEMINI_CLI_HEADERS,
   EMPTY_SCHEMA_PLACEHOLDER_NAME,
   EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION,
   SKIP_THOUGHT_SIGNATURE,
@@ -15,6 +13,7 @@ import {
   createStreamingTransformer,
   transformSseLine,
   transformStreamingPayload,
+  sanitizeGuardrailMessage,
 } from "./core/streaming";
 import { defaultSignatureStore } from "./stores/signature-store";
 import {
@@ -37,6 +36,7 @@ import {
   fixToolResponseGrouping,
   validateAndFixClaudeToolPairing,
   applyToolPairingFixes,
+  sanitizeEndingModelTurn,
   injectParameterSignatures,
   injectToolHardeningInstruction,
   isThinkingCapableModel,
@@ -63,6 +63,10 @@ import {
   resolveModelWithTier,
   resolveModelWithVariant,
   resolveModelForHeaderStyle,
+  resolveAntigravityGemini35FlashBackendModel,
+  resolveAntigravityGemini36FlashBackendModel,
+  resolveAntigravityGemini37FlashBackendModel,
+  resolveAntigravityGemini38FlashBackendModel,
   isClaudeModel,
   isClaudeThinkingModel,
   CLAUDE_THINKING_MAX_OUTPUT_TOKENS,
@@ -740,6 +744,43 @@ export interface PrepareRequestOptions {
   googleSearch?: GoogleSearchConfig;
   /** Per-account fingerprint for rate limit mitigation. Falls back to session fingerprint if not provided. */
   fingerprint?: Fingerprint;
+  /** Gemini safety level ("medium" | "high" | "none"). Default: "medium" */
+  safetyLevel?: "medium" | "high" | "none";
+}
+
+/**
+ * Builds safety settings payload for Gemini requests according to the configured safetyLevel.
+ */
+export function buildSafetySettings(safetyLevel: "medium" | "high" | "none" = "medium"): Array<{ category: string; threshold: string }> {
+  if (safetyLevel === "none") {
+    return [
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_JAILBREAK", threshold: "BLOCK_NONE" },
+    ];
+  }
+
+  if (safetyLevel === "high") {
+    return [
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
+      { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_ONLY_HIGH" },
+    ];
+  }
+
+  // Default: "medium" (Google native standard baseline)
+  return [
+    { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+    { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+    { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+    { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+    { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+  ];
 }
 
 export function prepareAntigravityRequest(
@@ -751,6 +792,7 @@ export function prepareAntigravityRequest(
   headerStyle: HeaderStyle = "antigravity",
   forceThinkingRecovery = false,
   options?: PrepareRequestOptions,
+  forceModelTurnFix = false,
 ): {
   request: RequestInfo;
   init: RequestInit;
@@ -788,6 +830,10 @@ export function prepareAntigravityRequest(
 
   headers.set("Authorization", `Bearer ${accessToken}`);
   headers.delete("x-api-key");
+  // Strip x-goog-api-key header: OpenCode injects an invalid Google AI Studio/
+  // Vertex API key when intercepting generativelanguage requests. Without
+  // removing it, the Antigravity backend rejects with 400 API_KEY_INVALID.
+  headers.delete("x-goog-api-key");
   // Strip x-goog-user-project header to prevent 403 auth/license conflicts.
   // This header is added by OpenCode/AI SDK and can force project-level checks
   // that are not required for Antigravity/Gemini CLI OAuth requests.
@@ -810,7 +856,7 @@ export function prepareAntigravityRequest(
   let effectiveModel = resolved.actualModel;
 
   const streaming = rawAction === STREAM_ACTION;
-  const defaultEndpoint = headerStyle === "gemini-cli" ? GEMINI_CLI_ENDPOINT : ANTIGRAVITY_ENDPOINT;
+  const defaultEndpoint = ANTIGRAVITY_ENDPOINT;
   const baseEndpoint = endpointOverride ?? defaultEndpoint;
   const transformedUrl = `${baseEndpoint}/v1internal:${rawAction}${streaming ? "?alt=sse" : ""}`;
 
@@ -835,11 +881,61 @@ export function prepareAntigravityRequest(
       const parsedBody = JSON.parse(baseInit.body) as Record<string, unknown>;
       const isWrapped = typeof parsedBody.project === "string" && "request" in parsedBody;
 
+      // #37: apply the thinking variant (effort) BEFORE resolving the backend model
+      // so the selected tier is honored on both wrapped and unwrapped bodies.
+      const requestRootForVariant = isWrapped
+        ? (parsedBody.request as Record<string, unknown> | undefined)
+        : undefined;
+      // providerOptions may live at the top level (wrapped) or inline (unwrapped);
+      // generationConfig usually lives inside `request` when wrapped.
+      const variantProviderOptions = (parsedBody.providerOptions ?? requestRootForVariant?.providerOptions) as
+        | Record<string, unknown>
+        | undefined;
+      const variantGenerationConfig = (requestRootForVariant?.generationConfig ?? parsedBody.generationConfig) as
+        | Record<string, unknown>
+        | undefined;
+      const earlyVariantConfig = extractVariantThinkingConfig(variantProviderOptions, variantGenerationConfig);
+      const isGemini3Model = effectiveModel.toLowerCase().includes("gemini-3");
+      if (earlyVariantConfig?.thinkingLevel && isGemini3Model) {
+        tierThinkingLevel = earlyVariantConfig.thinkingLevel;
+        tierThinkingBudget = undefined;
+      } else if (earlyVariantConfig?.thinkingBudget) {
+        if (isGemini3Model) {
+          log.warn("[Deprecated] Using thinkingBudget for Gemini 3 model. Use thinkingLevel instead.");
+          tierThinkingLevel = earlyVariantConfig.thinkingBudget <= 8192 ? "low"
+            : earlyVariantConfig.thinkingBudget <= 16384 ? "medium" : "high";
+          tierThinkingBudget = undefined;
+        } else {
+          tierThinkingBudget = earlyVariantConfig.thinkingBudget;
+          tierThinkingLevel = undefined;
+        }
+      }
+
       if (isWrapped) {
         const wrappedBody = {
           ...parsedBody,
           model: effectiveModel,
         } as Record<string, unknown>;
+
+        if (headerStyle === "antigravity") {
+          const gemini38FlashBackendModel = resolveAntigravityGemini38FlashBackendModel(rawModel, tierThinkingLevel);
+          if (gemini38FlashBackendModel) {
+            effectiveModel = gemini38FlashBackendModel;
+            wrappedBody.model = gemini38FlashBackendModel;
+          } else {
+            const gemini37FlashBackendModel = resolveAntigravityGemini37FlashBackendModel(rawModel, tierThinkingLevel);
+            if (gemini37FlashBackendModel) {
+              effectiveModel = gemini37FlashBackendModel;
+              wrappedBody.model = gemini37FlashBackendModel;
+            } else {
+              const gemini36FlashBackendModel = resolveAntigravityGemini36FlashBackendModel(rawModel, tierThinkingLevel);
+              if (gemini36FlashBackendModel) {
+                effectiveModel = gemini36FlashBackendModel;
+                wrappedBody.model = gemini36FlashBackendModel;
+              }
+            }
+          }
+        }
 
         // Some callers may already send an Antigravity-wrapped body.
         // We still need to sanitize Claude thinking blocks (remove cache_control)
@@ -891,6 +987,10 @@ export function prepareAntigravityRequest(
 
             // Step 3: Apply tool pairing fixes (ID assignment, response matching, orphan recovery)
             applyToolPairingFixes(req as Record<string, unknown>, true);
+          } else if (Array.isArray((req as any).contents)) {
+            // Gemini models: sanitize trailing model turns with dangling
+            // functionCalls (400 "Requests ending with a model turn are not supported").
+            (req as any).contents = sanitizeEndingModelTurn((req as any).contents, forceModelTurnFix);
           }
         }
 
@@ -914,29 +1014,23 @@ export function prepareAntigravityRequest(
         const rawGenerationConfig = requestPayload.generationConfig as Record<string, unknown> | undefined;
         const extraBody = requestPayload.extra_body as Record<string, unknown> | undefined;
 
-        const variantConfig = extractVariantThinkingConfig(
-          requestPayload.providerOptions as Record<string, unknown> | undefined,
-          rawGenerationConfig
-        );
-        const isGemini3 = effectiveModel.toLowerCase().includes("gemini-3");
+        // Variant/effort was already applied above (before backend-model resolution, see #37).
+        log.debug(`[ThinkingResolution] rawModel=${rawModel} resolvedModel=${effectiveModel} resolvedTier=${tierThinkingLevel ?? "none"} variantLevel=${earlyVariantConfig?.thinkingLevel ?? "none"} variantBudget=${earlyVariantConfig?.thinkingBudget ?? "none"} providerOptions.google=${JSON.stringify((requestPayload.providerOptions as any)?.google ?? null)} generationConfig.thinkingConfig=${JSON.stringify((rawGenerationConfig as any)?.thinkingConfig ?? null)}`);
 
-        log.debug(`[ThinkingResolution] rawModel=${rawModel} resolvedModel=${effectiveModel} resolvedTier=${tierThinkingLevel ?? "none"} variantLevel=${variantConfig?.thinkingLevel ?? "none"} variantBudget=${variantConfig?.thinkingBudget ?? "none"} providerOptions.google=${JSON.stringify((requestPayload.providerOptions as any)?.google ?? null)} generationConfig.thinkingConfig=${JSON.stringify((rawGenerationConfig as any)?.thinkingConfig ?? null)}`);
-
-        if (variantConfig?.thinkingLevel && isGemini3) {
-          // Gemini 3 native format - use thinkingLevel directly
-          tierThinkingLevel = variantConfig.thinkingLevel;
-          tierThinkingBudget = undefined;
-        } else if (variantConfig?.thinkingBudget) {
-          if (isGemini3) {
-            // Legacy format for Gemini 3 - convert with deprecation warning
-            log.warn("[Deprecated] Using thinkingBudget for Gemini 3 model. Use thinkingLevel instead.");
-            tierThinkingLevel = variantConfig.thinkingBudget <= 8192 ? "low"
-              : variantConfig.thinkingBudget <= 16384 ? "medium" : "high";
-            tierThinkingBudget = undefined;
+        if (headerStyle === "antigravity") {
+          const gemini38FlashBackendModel = resolveAntigravityGemini38FlashBackendModel(rawModel, tierThinkingLevel);
+          if (gemini38FlashBackendModel) {
+            effectiveModel = gemini38FlashBackendModel;
           } else {
-            // Claude / Gemini 2.5 - use budget directly
-            tierThinkingBudget = variantConfig.thinkingBudget;
-            tierThinkingLevel = undefined;
+            const gemini37FlashBackendModel = resolveAntigravityGemini37FlashBackendModel(rawModel, tierThinkingLevel);
+            if (gemini37FlashBackendModel) {
+              effectiveModel = gemini37FlashBackendModel;
+            } else {
+              const gemini36FlashBackendModel = resolveAntigravityGemini36FlashBackendModel(rawModel, tierThinkingLevel);
+              if (gemini36FlashBackendModel) {
+                effectiveModel = gemini36FlashBackendModel;
+              }
+            }
           }
         }
 
@@ -981,15 +1075,9 @@ export function prepareAntigravityRequest(
           }
           requestPayload.generationConfig = generationConfig;
 
-          // Add safety settings for image generation (permissive to allow creative content)
+          // Add safety settings for image generation
           if (!requestPayload.safetySettings) {
-            requestPayload.safetySettings = [
-              { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
-              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
-              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
-              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
-              { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_ONLY_HIGH" },
-            ];
+            requestPayload.safetySettings = buildSafetySettings(options?.safetyLevel ?? "medium");
           }
 
           // Image models don't support tools - remove them entirely
@@ -1351,9 +1439,11 @@ export function prepareAntigravityRequest(
         }
 
         // For Claude models, ensure functionCall/tool use parts carry IDs (required by Anthropic).
+        // For Gemini models, the same pass repairs orphaned tool calls and injects
+        // placeholder responses so the history never ends on a dangling model turn.
         // We use a two-pass approach: first collect all functionCalls and assign IDs,
         // then match functionResponses to their corresponding calls using a FIFO queue per function name.
-        if (isClaude && Array.isArray(requestPayload.contents)) {
+        if (Array.isArray(requestPayload.contents)) {
           let toolCallCounter = 0;
           // Track pending call IDs per function name as a FIFO queue
           const pendingCallIdsByName = new Map<string, string[]>();
@@ -1413,6 +1503,13 @@ export function prepareAntigravityRequest(
           // create ID mismatches between calls and responses.
           // Ported from LLM-API-Key-Proxy's _fix_tool_response_grouping()
           requestPayload.contents = fixToolResponseGrouping(requestPayload.contents as any[]);
+
+          // Fourth pass (Gemini): guarantee the history does not end with a model
+          // turn holding a dangling functionCall (400 "Requests ending with a model
+          // turn are not supported"). Claude keeps its own messages[]-based fix.
+          if (!isClaude) {
+            requestPayload.contents = sanitizeEndingModelTurn(requestPayload.contents as any[], forceModelTurnFix);
+          }
         }
 
         // Fourth pass: Fix Claude format tool pairing (defense in depth)
@@ -1455,6 +1552,11 @@ export function prepareAntigravityRequest(
 
         if ("model" in requestPayload) {
           delete requestPayload.model;
+        }
+
+        // Inject safetySettings according to configured safetyLevel (default: medium / Google baseline)
+        if (!isClaude && !requestPayload.safetySettings) {
+          requestPayload.safetySettings = buildSafetySettings(options?.safetyLevel ?? "medium");
         }
 
         stripInjectedDebugFromRequestPayload(requestPayload);
@@ -1536,23 +1638,22 @@ export function prepareAntigravityRequest(
     }
   }
 
-  if (headerStyle === "antigravity") {
-    // Use randomized headers as the fallback pool for Antigravity mode
-    const selectedHeaders = getRandomizedHeaders("antigravity", requestedModel);
+  // Antigravity mode: Match Antigravity Manager & CLI signature
+  const fingerprint = options?.fingerprint ?? getSessionFingerprint();
+  const fingerprintHeaders = buildFingerprintHeaders(fingerprint);
+  const selectedHeaders = getRandomizedHeaders("antigravity", requestedModel);
 
-    // Antigravity mode: Match Antigravity Manager behavior
-    // AM only sends User-Agent on content requests — no X-Goog-Api-Client, no Client-Metadata header
-    // (ideType=ANTIGRAVITY goes in request body metadata via project.ts, not as a header)
-    const fingerprint = options?.fingerprint ?? getSessionFingerprint();
-    const fingerprintHeaders = buildFingerprintHeaders(fingerprint);
-
-    headers.set("User-Agent", fingerprintHeaders["User-Agent"] || selectedHeaders["User-Agent"]);
-  } else {
-    // Gemini CLI mode: match opencode-gemini-auth Code Assist header set exactly
-    headers.set("User-Agent", GEMINI_CLI_HEADERS["User-Agent"]);
-    headers.set("X-Goog-Api-Client", GEMINI_CLI_HEADERS["X-Goog-Api-Client"]);
-    headers.set("Client-Metadata", GEMINI_CLI_HEADERS["Client-Metadata"]);
+  let userAgent = fingerprintHeaders["User-Agent"] || selectedHeaders["User-Agent"];
+  // Gemini 3.7/3.8 Flash are only served to the official Antigravity CLI user agent.
+  // With the generic `antigravity/<ver> <platform>/<arch>` UA the backend
+  // returns 404 NOT_FOUND (rewritten as "enable preview features").
+  // Verified with agy v1.2.7: UA `antigravity/cli/<ver> (aidev_client; ...)`
+  // returns 200 with modelVersion gemini-3.7-flash / gemini-3.8-flash for low/medium/high.
+  if (/gemini-3\.[78]-flash/i.test(effectiveModel)) {
+    userAgent = "antigravity/cli/1.2.7 (aidev_client; os_type=linux; arch=amd64; cl=962369648; auth_method=consumer)";
   }
+  headers.set("User-Agent", userAgent);
+
   return {
     request: transformedUrl,
     init: {
@@ -1639,6 +1740,7 @@ export async function transformAntigravityResponse(
   toolDebugSummary?: string,
   toolDebugPayload?: string,
   debugLines?: string[],
+  onSafetyRatings?: (ratings: import("./core/streaming/types").SafetyRating[]) => void,
 ): Promise<Response> {
   const contentType = response.headers.get("content-type") ?? "";
   const isJsonResponse = contentType.includes("application/json");
@@ -1678,6 +1780,7 @@ export async function transformAntigravityResponse(
       {
         onCacheSignature: cacheSignature,
         onInjectDebug: injectDebugThinking,
+        onSafetyRatings,
         // onInjectSyntheticThinking removed - keep_thinking now uses debugText path
         transformThinkingParts,
       },
@@ -1717,16 +1820,26 @@ export async function transformAntigravityResponse(
             ? errorBody.error.message
             : "Unknown error";
         const errorType = detectErrorType(rawErrorMessage);
-        const debugInfo = `\n\n[Debug Info]\nRequested Model: ${requestedModel || "Unknown"}\nEffective Model: ${effectiveModel || "Unknown"}\nProject: ${projectId || "Unknown"}\nEndpoint: ${endpoint || "Unknown"}\nStatus: ${response.status}\nRequest ID: ${headers.get("x-request-id") || "N/A"}${toolDebugMissing !== undefined ? `\nTool Debug Missing: ${toolDebugMissing}` : ""}${toolDebugSummary ? `\nTool Debug Summary: ${toolDebugSummary}` : ""}${toolDebugPayload ? `\nTool Debug Payload: ${toolDebugPayload}` : ""}`;
+        const cleanDebugInfo = `\n\n[Debug Info]\nRequested Model: ${requestedModel || "Unknown"}\nEffective Model: ${effectiveModel || "Unknown"}\nProject: ${projectId || "Unknown"}\nEndpoint: ${endpoint || "Unknown"}\nStatus: ${response.status}\nRequest ID: ${headers.get("x-request-id") || "N/A"}`;
         const injectedDebug = debugText ? `\n\n${debugText}` : "";
-        errorBody.error.message = rawErrorMessage + debugInfo + injectedDebug;
+        errorBody.error.message = rawErrorMessage + cleanDebugInfo + injectedDebug;
 
         // Check if this is a recoverable thinking error - throw to trigger retry
         if (errorType === "thinking_block_order") {
           const recoveryError = new Error("THINKING_RECOVERY_NEEDED");
           (recoveryError as any).recoveryType = errorType;
           (recoveryError as any).originalError = errorBody;
-          (recoveryError as any).debugInfo = debugInfo;
+          (recoveryError as any).debugInfo = cleanDebugInfo;
+          throw recoveryError;
+        }
+
+        // Detect "history ends with a dangling model turn" (400) - throw to trigger
+        // a retry whose payload is sanitized via sanitizeEndingModelTurn.
+        if (errorType === "model_turn_end") {
+          const recoveryError = new Error("MODEL_TURN_RECOVERY_NEEDED");
+          (recoveryError as any).recoveryType = errorType;
+          (recoveryError as any).originalError = errorBody;
+          (recoveryError as any).debugInfo = cleanDebugInfo;
           throw recoveryError;
         }
 
@@ -1833,6 +1946,7 @@ export async function transformAntigravityResponse(
       if (debugText) {
         responseBody = injectDebugThinking(responseBody, debugText);
       }
+      responseBody = sanitizeGuardrailMessage(responseBody);
       const transformed = transformThinkingParts(responseBody);
       return new Response(JSON.stringify(transformed), init);
     }
@@ -1844,6 +1958,11 @@ export async function transformAntigravityResponse(
     return new Response(text, init);
   } catch (error) {
     if (error instanceof Error && error.message === "THINKING_RECOVERY_NEEDED") {
+      throw error;
+    }
+
+    // Propagate model-turn recovery so plugin.ts can retry with sanitized payload
+    if (error instanceof Error && error.message === "MODEL_TURN_RECOVERY_NEEDED") {
       throw error;
     }
 

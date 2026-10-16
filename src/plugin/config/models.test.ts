@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { OPENCODE_MODEL_DEFINITIONS } from "./models";
+import { OPENCODE_MODEL_DEFINITIONS, OPENCODE_WHITELIST_MODELS } from "./models";
 
 const getModel = (name: string) => {
   const model = OPENCODE_MODEL_DEFINITIONS[name];
@@ -11,37 +11,23 @@ const getModel = (name: string) => {
 };
 
 describe("OPENCODE_MODEL_DEFINITIONS", () => {
-  it("includes the full set of configured models", () => {
+  it("includes the full set of configured models (excluding deprecated 3.5 Flash)", () => {
     const modelNames = Object.keys(OPENCODE_MODEL_DEFINITIONS).sort();
 
     expect(modelNames).toEqual([
       "antigravity-claude-opus-4-6-thinking",
       "antigravity-claude-sonnet-4-6",
-      "antigravity-gemini-3-flash",
-      "antigravity-gemini-3-pro",
-      "antigravity-gemini-3.1-pro",
-      "gemini-2.5-flash",
-      "gemini-2.5-pro",
-      "gemini-3-flash-preview",
-      "gemini-3-pro-preview",
-      "gemini-3.1-pro-preview",
-      "gemini-3.1-pro-preview-customtools",
+      "antigravity-gemini-3.8-flash",
+      "antigravity-gpt-oss-120b-medium",
     ]);
   });
 
-  it("defines Gemini 3 variants for Antigravity models", () => {
-    expect(getModel("antigravity-gemini-3-pro").variants).toEqual({
-      low: { thinkingLevel: "low" },
-      high: { thinkingLevel: "high" },
-    });
+  it("exports OPENCODE_WHITELIST_MODELS matching definition keys", () => {
+    expect(OPENCODE_WHITELIST_MODELS.sort()).toEqual(Object.keys(OPENCODE_MODEL_DEFINITIONS).sort());
+  });
 
-    expect(getModel("antigravity-gemini-3.1-pro").variants).toEqual({
-      low: { thinkingLevel: "low" },
-      high: { thinkingLevel: "high" },
-    });
-
-    expect(getModel("antigravity-gemini-3-flash").variants).toEqual({
-      minimal: { thinkingLevel: "minimal" },
+  it("defines Gemini 3.8 Flash variants", () => {
+    expect(getModel("antigravity-gemini-3.8-flash").variants).toEqual({
       low: { thinkingLevel: "low" },
       medium: { thinkingLevel: "medium" },
       high: { thinkingLevel: "high" },
@@ -51,6 +37,17 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
   it("defines thinking budget variants for Claude thinking models", () => {
     expect(getModel("antigravity-claude-opus-4-6-thinking").variants).toEqual({
       low: { thinkingConfig: { thinkingBudget: 8192 } },
+      medium: { thinkingConfig: { thinkingBudget: 16384 } },
+      high: { thinkingConfig: { thinkingBudget: 24576 } },
+      max: { thinkingConfig: { thinkingBudget: 32768 } },
+    });
+  });
+
+  it("defines (inert) thinking tiers for Claude Sonnet to mirror config intent", () => {
+    expect(getModel("antigravity-claude-sonnet-4-6").variants).toEqual({
+      low: { thinkingConfig: { thinkingBudget: 8192 } },
+      medium: { thinkingConfig: { thinkingBudget: 16384 } },
+      high: { thinkingConfig: { thinkingBudget: 24576 } },
       max: { thinkingConfig: { thinkingBudget: 32768 } },
     });
   });

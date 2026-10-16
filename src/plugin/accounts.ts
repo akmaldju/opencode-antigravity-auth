@@ -34,6 +34,8 @@ const MODEL_CAPACITY_EXHAUSTED_JITTER_MAX = 30_000; // ±15s jitter range
 const SERVER_ERROR_BACKOFF = 20_000;
 const UNKNOWN_BACKOFF = 60_000;
 const MIN_BACKOFF_MS = 2_000;
+export const MAX_RPM_RETRY_AFTER_MS = 60_000;
+const DEFAULT_QUOTA_CACHE_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Generate a random jitter value for backoff timing.
@@ -93,15 +95,28 @@ export function parseRateLimitReason(
   return "UNKNOWN";
 }
 
+function shouldCapRetryAfter(reason: RateLimitReason, remainingFraction?: number | null): boolean {
+  if (reason !== "QUOTA_EXHAUSTED") {
+    return true;
+  }
+  return remainingFraction != null && remainingFraction > 0;
+}
+
 export function calculateBackoffMs(
   reason: RateLimitReason,
   consecutiveFailures: number,
-  retryAfterMs?: number | null
+  retryAfterMs?: number | null,
+  remainingFraction?: number | null,
 ): number {
-  // Respect explicit Retry-After header if reasonable
+  // Respect explicit Retry-After header if reasonable, but never persist a
+  // weekly/5h reset as an RPM cooldown — Antigravity often returns weekly
+  // RetryInfo even when the 5h Claude bar is still LIVE.
   if (retryAfterMs && retryAfterMs > 0) {
-    // Rust uses 2s min buffer, we keep 2s
-    return Math.max(retryAfterMs, MIN_BACKOFF_MS);
+    const raw = Math.max(retryAfterMs, MIN_BACKOFF_MS);
+    if (shouldCapRetryAfter(reason, remainingFraction)) {
+      return Math.min(raw, MAX_RPM_RETRY_AFTER_MS);
+    }
+    return raw;
   }
   
   switch (reason) {
@@ -122,7 +137,7 @@ export function calculateBackoffMs(
   }
 }
 
-export type BaseQuotaKey = "claude" | "gemini-antigravity" | "gemini-cli";
+export type BaseQuotaKey = "claude" | "gemini-antigravity";
 export type QuotaKey = BaseQuotaKey | `${BaseQuotaKey}:${string}`;
 
 export interface ManagedAccount {
@@ -153,6 +168,8 @@ export interface ManagedAccount {
   verificationRequiredAt?: number;
   verificationRequiredReason?: string;
   verificationUrl?: string;
+  /** Counter of consecutive high safety risk evaluations (Account Shield) */
+  consecutiveHighRiskTriggers?: number;
 }
 
 function nowMs(): number {
@@ -166,51 +183,93 @@ function clampNonNegativeInt(value: unknown, fallback: number): number {
   return value < 0 ? 0 : Math.floor(value);
 }
 
-function getQuotaKey(family: ModelFamily, headerStyle: HeaderStyle, model?: string | null): QuotaKey {
+function getQuotaKey(family: ModelFamily, headerStyle: HeaderStyle = "antigravity", model?: string | null): QuotaKey {
   if (family === "claude") {
     return "claude";
   }
-  const base = headerStyle === "gemini-cli" ? "gemini-cli" : "gemini-antigravity";
+  const base = "gemini-antigravity";
   if (model) {
     return `${base}:${model}`;
   }
   return base;
 }
 
-function isRateLimitedForQuotaKey(account: ManagedAccount, key: QuotaKey): boolean {
-  const resetTime = account.rateLimitResetTimes[key];
-  return resetTime !== undefined && nowMs() < resetTime;
+function getFreshRemainingFraction(
+  account: ManagedAccount,
+  family: ModelFamily,
+  cacheTtlMs: number,
+  model?: string | null,
+): number | undefined {
+  if (!account.cachedQuota) return undefined;
+  if (account.cachedQuotaUpdatedAt == null) return undefined;
+  const age = nowMs() - account.cachedQuotaUpdatedAt;
+  if (age > cacheTtlMs) return undefined;
+
+  const quotaGroup = resolveQuotaGroup(family, model);
+  const fraction = account.cachedQuota[quotaGroup]?.remainingFraction;
+  if (fraction == null || !Number.isFinite(fraction)) return undefined;
+  return Math.max(0, Math.min(1, fraction));
 }
 
-function isRateLimitedForFamily(account: ManagedAccount, family: ModelFamily, model?: string | null): boolean {
+function isRateLimitedForQuotaKey(
+  account: ManagedAccount,
+  key: QuotaKey,
+  family: ModelFamily,
+  cacheTtlMs: number = DEFAULT_QUOTA_CACHE_TTL_MS,
+  model?: string | null,
+): boolean {
+  const resetTime = account.rateLimitResetTimes[key];
+  if (resetTime === undefined || nowMs() >= resetTime) {
+    return false;
+  }
+  const remainingMs = resetTime - nowMs();
+  if (remainingMs <= MAX_RPM_RETRY_AFTER_MS) {
+    return true;
+  }
+  const remaining = getFreshRemainingFraction(account, family, cacheTtlMs, model);
+  if (remaining !== undefined && remaining > 0) {
+    return false;
+  }
+  return true;
+}
+
+function isRateLimitedForFamily(
+  account: ManagedAccount,
+  family: ModelFamily,
+  model?: string | null,
+  cacheTtlMs: number = DEFAULT_QUOTA_CACHE_TTL_MS,
+): boolean {
   if (family === "claude") {
-    return isRateLimitedForQuotaKey(account, "claude");
+    return isRateLimitedForQuotaKey(account, "claude", family, cacheTtlMs, model);
   }
   
-  const antigravityIsLimited = isRateLimitedForHeaderStyle(account, family, "antigravity", model);
-  const cliIsLimited = isRateLimitedForHeaderStyle(account, family, "gemini-cli", model);
-  
-  return antigravityIsLimited && cliIsLimited;
+  return isRateLimitedForHeaderStyle(account, family, "antigravity", model, cacheTtlMs);
 }
 
-function isRateLimitedForHeaderStyle(account: ManagedAccount, family: ModelFamily, headerStyle: HeaderStyle, model?: string | null): boolean {
+function isRateLimitedForHeaderStyle(
+  account: ManagedAccount,
+  family: ModelFamily,
+  headerStyle: HeaderStyle,
+  model?: string | null,
+  cacheTtlMs: number = DEFAULT_QUOTA_CACHE_TTL_MS,
+): boolean {
   clearExpiredRateLimits(account);
   
   if (family === "claude") {
-    return isRateLimitedForQuotaKey(account, "claude");
+    return isRateLimitedForQuotaKey(account, "claude", family, cacheTtlMs, model);
   }
 
   // Check model-specific quota first if provided
   if (model) {
     const modelKey = getQuotaKey(family, headerStyle, model);
-    if (isRateLimitedForQuotaKey(account, modelKey)) {
+    if (isRateLimitedForQuotaKey(account, modelKey, family, cacheTtlMs, model)) {
       return true;
     }
   }
 
   // Then check base family quota
   const baseKey = getQuotaKey(family, headerStyle);
-  return isRateLimitedForQuotaKey(account, baseKey);
+  return isRateLimitedForQuotaKey(account, baseKey, family, cacheTtlMs, model);
 }
 
 function clearExpiredRateLimits(account: ManagedAccount): void {
@@ -535,7 +594,7 @@ export class AccountManager {
             index: acc.index,
             lastUsed: acc.lastUsed,
             healthScore: healthTracker.getScore(acc.index),
-            isRateLimited: isRateLimitedForFamily(acc, family, model) || 
+            isRateLimited: isRateLimitedForFamily(acc, family, model, softQuotaCacheTtlMs) || 
                           isOverSoftQuotaThreshold(acc, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model),
             isCoolingDown: this.isAccountCoolingDown(acc),
           };
@@ -573,7 +632,7 @@ export class AccountManager {
     const current = this.getCurrentAccountForFamily(family);
     if (current) {
       clearExpiredRateLimits(current);
-      const isLimitedForRequestedStyle = isRateLimitedForHeaderStyle(current, family, headerStyle, model);
+      const isLimitedForRequestedStyle = isRateLimitedForHeaderStyle(current, family, headerStyle, model, softQuotaCacheTtlMs);
       const isOverThreshold = isOverSoftQuotaThreshold(current, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model);
       if (!isLimitedForRequestedStyle && !isOverThreshold && !this.isAccountCoolingDown(current)) {
         this.markTouchedForQuota(current, quotaKey);
@@ -593,7 +652,7 @@ export class AccountManager {
     const available = this.accounts.filter((a) => {
       clearExpiredRateLimits(a);
       return a.enabled !== false && 
-             !isRateLimitedForHeaderStyle(a, family, headerStyle, model) && 
+             !isRateLimitedForHeaderStyle(a, family, headerStyle, model, softQuotaCacheTtlMs) && 
              !isOverSoftQuotaThreshold(a, family, softQuotaThresholdPercent, softQuotaCacheTtlMs, model) &&
              !this.isAccountCoolingDown(a);
     });
@@ -621,6 +680,24 @@ export class AccountManager {
   ): void {
     const key = getQuotaKey(family, headerStyle, model);
     account.rateLimitResetTimes[key] = nowMs() + retryAfterMs;
+    // Keep internal accounts array in sync if account was a cloned snapshot
+    const target = this.accounts.find(a => a.index === account.index);
+    if (target && target !== account) {
+      target.rateLimitResetTimes[key] = account.rateLimitResetTimes[key];
+    }
+  }
+
+  markRateLimitedByIndex(
+    accountIndex: number,
+    retryAfterMs: number,
+    family: ModelFamily,
+    headerStyle: HeaderStyle = "antigravity",
+    model?: string | null
+  ): void {
+    const account = this.accounts.find(a => a.index === accountIndex);
+    if (account) {
+      this.markRateLimited(account, retryAfterMs, family, headerStyle, model);
+    }
   }
 
   /**
@@ -643,6 +720,7 @@ export class AccountManager {
     reason: RateLimitReason,
     retryAfterMs?: number | null,
     failureTtlMs: number = 3600_000, // Default 1 hour TTL
+    absoluteResetAtMs?: number | null,
   ): number {
     const now = nowMs();
     
@@ -654,12 +732,22 @@ export class AccountManager {
     const failures = (account.consecutiveFailures ?? 0) + 1;
     account.consecutiveFailures = failures;
     account.lastFailureTime = now;
-    
-    const backoffMs = calculateBackoffMs(reason, failures - 1, retryAfterMs);
+
+    const remainingFraction = getFreshRemainingFraction(account, family, DEFAULT_QUOTA_CACHE_TTL_MS, model);
+    let effectiveWaitMs: number;
+    if (absoluteResetAtMs && absoluteResetAtMs > now) {
+      effectiveWaitMs = absoluteResetAtMs - now;
+    } else {
+      effectiveWaitMs = calculateBackoffMs(reason, failures - 1, retryAfterMs, remainingFraction);
+    }
+    if (shouldCapRetryAfter(reason, remainingFraction)) {
+      effectiveWaitMs = Math.min(Math.max(effectiveWaitMs, MIN_BACKOFF_MS), MAX_RPM_RETRY_AFTER_MS);
+    }
+
     const key = getQuotaKey(family, headerStyle, model);
-    account.rateLimitResetTimes[key] = now + backoffMs;
+    account.rateLimitResetTimes[key] = now + effectiveWaitMs;
     
-    return backoffMs;
+    return effectiveWaitMs;
   }
 
   markRequestSuccess(account: ManagedAccount): void {
@@ -674,9 +762,7 @@ export class AccountManager {
         delete account.rateLimitResetTimes.claude;
       } else {
         const antigravityKey = getQuotaKey(family, "antigravity", model);
-        const cliKey = getQuotaKey(family, "gemini-cli", model);
         delete account.rateLimitResetTimes[antigravityKey];
-        delete account.rateLimitResetTimes[cliKey];
       }
       account.consecutiveFailures = 0;
     }
@@ -701,6 +787,36 @@ export class AccountManager {
       return false;
     }
     return true;
+  }
+
+  recordSafetyRiskTrigger(account: ManagedAccount): number {
+    account.consecutiveHighRiskTriggers = (account.consecutiveHighRiskTriggers ?? 0) + 1;
+    return account.consecutiveHighRiskTriggers;
+  }
+
+  resetSafetyRiskTrigger(account: ManagedAccount): void {
+    account.consecutiveHighRiskTriggers = 0;
+  }
+
+  advanceToNextAccount(family: ModelFamily, model?: string | null): ManagedAccount | null {
+    const current = this.getCurrentAccountForFamily(family);
+    const available = this.accounts.filter((a) => {
+      clearExpiredRateLimits(a);
+      return a.enabled !== false && 
+             !isRateLimitedForHeaderStyle(a, family, "antigravity", model) && 
+             !this.isAccountCoolingDown(a);
+    });
+
+    if (available.length <= 1) {
+      return available[0] ?? null;
+    }
+
+    const nextIndex = current ? (available.findIndex(a => a.index === current.index) + 1) % available.length : 0;
+    const next = available[nextIndex] ?? null;
+    if (next) {
+      this.currentAccountIndexByFamily[family] = next.index;
+    }
+    return next;
   }
 
   clearAccountCooldown(account: ManagedAccount): void {
@@ -747,37 +863,21 @@ export class AccountManager {
 
   getAvailableHeaderStyle(account: ManagedAccount, family: ModelFamily, model?: string | null): HeaderStyle | null {
     clearExpiredRateLimits(account);
-    if (family === "claude") {
-      return isRateLimitedForHeaderStyle(account, family, "antigravity") ? null : "antigravity";
-    }
     if (!isRateLimitedForHeaderStyle(account, family, "antigravity", model)) {
       return "antigravity";
-    }
-    if (!isRateLimitedForHeaderStyle(account, family, "gemini-cli", model)) {
-      return "gemini-cli";
     }
     return null;
   }
 
   /**
    * Check if any OTHER account has antigravity quota available for the given family/model.
-   * 
-   * Used to determine whether to switch accounts vs fall back to gemini-cli:
-   * - If true: Switch to another account (preserve antigravity priority)
-   * - If false: All accounts exhausted antigravity, safe to fall back to gemini-cli
-   * 
-   * @param currentAccountIndex - Index of the current account (will be excluded from check)
-   * @param family - Model family ("gemini" or "claude")
-   * @param model - Optional model name for model-specific rate limits
-   * @returns true if any other enabled, non-cooling-down account has antigravity available
    */
   hasOtherAccountWithAntigravityAvailable(
     currentAccountIndex: number,
     family: ModelFamily,
     model?: string | null
   ): boolean {
-    // Claude has no gemini-cli fallback - always return false
-    // (This method is only relevant for Gemini's dual quota pools)
+    // Claude has no alternate header fallback - return false to switch accounts normally
     if (family === "claude") {
       return false;
     }
@@ -945,43 +1045,103 @@ export class AccountManager {
     model?: string | null,
     headerStyle?: HeaderStyle,
     strict?: boolean,
+    cacheTtlMs: number = DEFAULT_QUOTA_CACHE_TTL_MS,
   ): number {
     const available = this.accounts.filter((a) => {
       clearExpiredRateLimits(a);
-      return a.enabled !== false && (strict && headerStyle
-        ? !isRateLimitedForHeaderStyle(a, family, headerStyle, model)
-        : !isRateLimitedForFamily(a, family, model));
+      const isLimited = strict && headerStyle
+        ? isRateLimitedForHeaderStyle(a, family, headerStyle, model, cacheTtlMs)
+        : isRateLimitedForFamily(a, family, model, cacheTtlMs);
+      return a.enabled !== false && !isLimited && !this.isAccountCoolingDown(a);
     });
     if (available.length > 0) {
       return 0;
     }
 
+    const now = nowMs();
     const waitTimes: number[] = [];
     for (const a of this.accounts) {
+      if (a.enabled === false) {
+        continue;
+      }
+
+      // Check account-level cooldown (auth/network/project/validation errors)
+      if (a.coolingDownUntil !== undefined && a.coolingDownUntil > now) {
+        waitTimes.push(a.coolingDownUntil - now);
+      }
+
       if (family === "claude") {
         const t = a.rateLimitResetTimes.claude;
-        if (t !== undefined) waitTimes.push(Math.max(0, t - nowMs()));
+        if (t !== undefined) waitTimes.push(Math.max(0, t - now));
       } else if (strict && headerStyle) {
         const key = getQuotaKey(family, headerStyle, model);
         const t = a.rateLimitResetTimes[key];
-        if (t !== undefined) waitTimes.push(Math.max(0, t - nowMs()));
+        if (t !== undefined) waitTimes.push(Math.max(0, t - now));
       } else {
-        // For Gemini, account becomes available when EITHER pool expires for this model/family
         const antigravityKey = getQuotaKey(family, "antigravity", model);
-        const cliKey = getQuotaKey(family, "gemini-cli", model);
-
         const t1 = a.rateLimitResetTimes[antigravityKey];
-        const t2 = a.rateLimitResetTimes[cliKey];
-        
-        const accountWait = Math.min(
-          t1 !== undefined ? Math.max(0, t1 - nowMs()) : Infinity,
-          t2 !== undefined ? Math.max(0, t2 - nowMs()) : Infinity
-        );
-        if (accountWait !== Infinity) waitTimes.push(accountWait);
+        if (t1 !== undefined) waitTimes.push(Math.max(0, t1 - now));
       }
     }
 
     return waitTimes.length > 0 ? Math.min(...waitTimes) : 0;
+  }
+
+  /**
+   * Get human-readable reasons why accounts are currently blocked for a given family/model.
+   * Distinguishes between rate-limits (with reset times), cooldowns, and disabled states.
+   */
+  getAllBlockedReasons(
+    family: ModelFamily,
+    model?: string | null,
+    headerStyle: HeaderStyle = "antigravity",
+  ): Array<{ email: string; reason: string; waitMs: number | null }> {
+    const now = nowMs();
+    return this.accounts.map((a, idx) => {
+      const label = a.email || `Account ${idx + 1}`;
+      if (a.enabled === false) {
+        const reasonStr = a.verificationRequired
+          ? `verification required (${a.verificationRequiredReason || "visit accounts.google.com"})`
+          : "account disabled";
+        return { email: label, reason: reasonStr, waitMs: null };
+      }
+
+      if (this.isAccountCoolingDown(a)) {
+        const remainingMs = Math.max(0, (a.coolingDownUntil ?? now) - now);
+        const remSec = Math.ceil(remainingMs / 1000);
+        return {
+          email: label,
+          reason: `cooling down (${a.cooldownReason ?? "error"}, ${remSec}s remaining)`,
+          waitMs: remainingMs,
+        };
+      }
+
+      // Check rate limit reset time
+      const quotaKey = getQuotaKey(family, headerStyle, model);
+      let resetTime = a.rateLimitResetTimes[quotaKey];
+      if (family === "gemini" && resetTime === undefined) {
+        const fallbackKey = getQuotaKey(family, "antigravity", model);
+        resetTime = a.rateLimitResetTimes[fallbackKey];
+      }
+
+      if (resetTime !== undefined && resetTime > now) {
+        const remainingMs = resetTime - now;
+        const remSec = Math.ceil(remainingMs / 1000);
+        const durationStr = remSec >= 3600
+          ? `${(remSec / 3600).toFixed(1)}h`
+          : remSec >= 60
+          ? `${Math.ceil(remSec / 60)}m`
+          : `${remSec}s`;
+        const resetDate = new Date(resetTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return {
+          email: label,
+          reason: `quota/rate-limited (resets at ~${resetDate}, in ${durationStr})`,
+          waitMs: remainingMs,
+        };
+      }
+
+      return { email: label, reason: "temporarily unavailable", waitMs: null };
+    });
   }
 
   getAccounts(): ManagedAccount[] {

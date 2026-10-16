@@ -1,10 +1,133 @@
 import type {
+  SafetyRating,
   SignatureStore,
   StreamingCallbacks,
   StreamingOptions,
   ThoughtBuffer,
 } from './types';
 import { processImageData } from '../../image-saver';
+
+export const CLEAN_GUARDRAIL_MESSAGE = "[Solicitud bloqueada por filtros de seguridad de Gemini. Por favor, intenta reformular tu prompt o enfoque.]";
+export const CLEAN_MALFORMED_CALL_MESSAGE = "[Llamada de herramienta vacía o malformada generada por el modelo. Reintentando o reformula tu solicitud.]";
+export const LOOP_DETECTED_MALFORMED_MESSAGE = "[Bucle de llamadas malformadas consecutivas detectado. La solicitud ha sido detenida para evitar bucle infinito. Por favor reformula tu prompt.]";
+
+const MAX_CONSECUTIVE_MALFORMED = 3;
+const MAX_TRACKED_SESSIONS = 512;
+const consecutiveMalformedBySession = new Map<string, number>();
+
+/**
+ * Records a malformed-call occurrence for a session and returns the current
+ * consecutive streak. Bounds the tracking map so long-lived processes do not
+ * accumulate stale session keys.
+ */
+function bumpMalformedStreak(sessionKey: string): number {
+  const streak = (consecutiveMalformedBySession.get(sessionKey) ?? 0) + 1;
+  consecutiveMalformedBySession.set(sessionKey, streak);
+  if (consecutiveMalformedBySession.size > MAX_TRACKED_SESSIONS) {
+    const oldest = consecutiveMalformedBySession.keys().next().value;
+    if (oldest !== undefined) {
+      consecutiveMalformedBySession.delete(oldest);
+    }
+  }
+  return streak;
+}
+
+/**
+ * Checks if a text is the generic verbose Gemini filter blocking message
+ * and replaces it with a clean, concise prompt rephrase invitation.
+ */
+export function sanitizeGuardrailText(text: string): string {
+  if (
+    text.includes("This request was blocked by Gemini's filters") ||
+    text.includes("blocked by Gemini's filters") ||
+    (text.includes("Gemini's filters") && text.includes("rephrasing your prompt"))
+  ) {
+    return CLEAN_GUARDRAIL_MESSAGE;
+  }
+  return text;
+}
+
+/**
+ * Replaces verbose Google safety filter messages in response candidates
+ * with a concise rephrasing invitation. Also handles MALFORMED_FUNCTION_CALL
+ * finishReason by rewriting to STOP with explanatory content to avoid hard session crash.
+ */
+export function sanitizeGuardrailMessage(response: unknown, sessionKey?: string): unknown {
+  if (!response || typeof response !== "object") return response;
+  const resp = response as Record<string, unknown>;
+
+  if (Array.isArray(resp.candidates)) {
+    for (const candidate of resp.candidates) {
+      const cand = candidate as Record<string, unknown> | null;
+      if (!cand) continue;
+
+      if (cand.finishReason === "SAFETY") {
+        if (!cand.content || typeof cand.content !== "object") {
+          cand.content = { parts: [{ text: CLEAN_GUARDRAIL_MESSAGE }], role: "model" };
+        }
+      }
+
+      if (cand.finishReason === "MALFORMED_FUNCTION_CALL") {
+        let msg = CLEAN_MALFORMED_CALL_MESSAGE;
+        if (sessionKey) {
+          const streak = bumpMalformedStreak(sessionKey);
+          if (streak >= MAX_CONSECUTIVE_MALFORMED) {
+            msg = LOOP_DETECTED_MALFORMED_MESSAGE;
+          }
+        }
+
+        cand.finishReason = "STOP";
+        if (cand.finishMessage) {
+          delete cand.finishMessage;
+        }
+        if (!cand.content || typeof cand.content !== "object") {
+          cand.content = { parts: [{ text: msg }], role: "model" };
+        } else {
+          const content = cand.content as Record<string, unknown>;
+          const parts: any[] = Array.isArray(content.parts) ? (content.parts as any[]) : [];
+          const isTextPart = (p: any) => p && typeof p === "object" && typeof p.text === "string";
+          const hasText = parts.some((p) => isTextPart(p) && p.text.trim().length > 0);
+          if (!hasText) {
+            // Append the clean message while preserving any non-text parts
+            // (e.g. thoughtSignature) so signature continuity is not broken.
+            content.parts = [...parts, { text: msg }];
+          } else if (msg === LOOP_DETECTED_MALFORMED_MESSAGE) {
+            // Drop stale textual content, but keep any non-text metadata such as
+            // thoughtSignature so the next turn still has signature continuity.
+            const kept: any[] = [];
+            for (const p of parts) {
+              if (!p || typeof p !== "object") continue;
+              if (typeof p.text === "string") {
+                const rest = { ...p };
+                delete rest.text;
+                if (Object.keys(rest).length > 0) kept.push(rest);
+              } else {
+                kept.push(p);
+              }
+            }
+            content.parts = [...kept, { text: msg }];
+          }
+        }
+      } else if (cand.finishReason === "STOP" && sessionKey) {
+        consecutiveMalformedBySession.delete(sessionKey);
+      }
+
+      if (cand.content && typeof cand.content === "object") {
+        const content = cand.content as Record<string, unknown>;
+        if (Array.isArray(content.parts)) {
+          for (const part of content.parts) {
+            const p = part as Record<string, unknown> | null;
+            if (p && typeof p.text === "string") {
+              p.text = sanitizeGuardrailText(p.text);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return response;
+}
 
 /**
  * Simple string hash for thinking deduplication.
@@ -212,7 +335,23 @@ export function transformSseLine(
         response = callbacks.onInjectDebug(response, options.debugText);
         debugState.injected = true;
       }
-      // Note: onInjectSyntheticThinking removed - keep_thinking now uses debugText path
+
+      // Clean guardrail / safety filter message
+      response = sanitizeGuardrailMessage(response, options.signatureSessionKey);
+
+      // Extract and notify safety ratings if present
+      if (callbacks.onSafetyRatings && parsed.response && typeof parsed.response === "object") {
+        const respObj = parsed.response as Record<string, unknown>;
+        if (Array.isArray(respObj.candidates)) {
+          for (const candidate of respObj.candidates) {
+            const cand = candidate as Record<string, unknown> | null;
+            if (cand && Array.isArray(cand.safetyRatings) && cand.safetyRatings.length > 0) {
+              callbacks.onSafetyRatings(cand.safetyRatings as any);
+              break;
+            }
+          }
+        }
+      }
 
       const transformed = callbacks.transformThinkingParts
         ? callbacks.transformThinkingParts(response)

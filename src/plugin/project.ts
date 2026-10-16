@@ -15,7 +15,7 @@ const projectContextPendingCache = new Map<string, Promise<ProjectContextResult>
 
 const CODE_ASSIST_METADATA = {
   ideType: "ANTIGRAVITY",
-  platform: process.platform === "win32" ? "WINDOWS" : "MACOS",
+  platform: "PLATFORM_UNSPECIFIED",
   pluginType: "GEMINI",
 } as const;
 
@@ -48,7 +48,7 @@ function buildMetadata(projectId?: string): Record<string, string> {
     platform: CODE_ASSIST_METADATA.platform,
     pluginType: CODE_ASSIST_METADATA.pluginType,
   };
-  if (projectId) {
+  if (projectId && projectId !== ANTIGRAVITY_DEFAULT_PROJECT_ID) {
     metadata.duetProject = projectId;
   }
   return metadata;
@@ -128,7 +128,7 @@ export async function loadManagedProject(
   const loadHeaders: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${accessToken}`,
-    "User-Agent": "google-api-nodejs-client/9.15.1",
+    "User-Agent": "antigravity",
     "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
     "Client-Metadata": getAntigravityHeaders()["Client-Metadata"],
   };
@@ -220,6 +220,17 @@ export async function onboardManagedProject(
 }
 
 /**
+ * Invalidate cached project context for an account (e.g. after 403 SUBSCRIPTION_REQUIRED).
+ */
+export function invalidateProjectContext(auth: OAuthAuthDetails): void {
+  const cacheKey = getCacheKey(auth);
+  if (cacheKey) {
+    projectContextResultCache.delete(cacheKey);
+    projectContextPendingCache.delete(cacheKey);
+  }
+}
+
+/**
  * Resolves an effective project ID for the current auth state, caching results per refresh token.
  */
 export async function ensureProjectContext(auth: OAuthAuthDetails): Promise<ProjectContextResult> {
@@ -261,7 +272,8 @@ export async function ensureProjectContext(auth: OAuthAuthDetails): Promise<Proj
     };
 
     // Try to resolve a managed project from Antigravity if possible.
-    const loadPayload = await loadManagedProject(accessToken, parts.projectId ?? fallbackProjectId);
+    // Use undefined instead of fallbackProjectId so Google resolves the account's own companion project
+    const loadPayload = await loadManagedProject(accessToken, parts.projectId);
     const resolvedManagedProjectId = extractManagedProjectId(loadPayload);
 
     if (resolvedManagedProjectId) {
@@ -270,7 +282,7 @@ export async function ensureProjectContext(auth: OAuthAuthDetails): Promise<Proj
 
     // No managed project found - try to auto-provision one via onboarding.
     // This handles accounts that were added before managed project provisioning was required.
-    const tierId = getDefaultTierId(loadPayload?.allowedTiers) ?? "FREE";
+    const tierId = getDefaultTierId(loadPayload?.allowedTiers) ?? "free-tier";
     log.debug("Auto-provisioning managed project", { tierId, projectId: parts.projectId });
     
     const provisionedProjectId = await onboardManagedProject(

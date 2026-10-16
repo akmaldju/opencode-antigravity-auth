@@ -63,6 +63,12 @@ const TIER_REGEX = /-(minimal|low|medium|high)$/;
 const QUOTA_PREFIX_REGEX = /^antigravity-/i;
 const GEMINI_3_PRO_REGEX = /^gemini-3(?:\.\d+)?-pro/i;
 const GEMINI_3_FLASH_REGEX = /^gemini-3(?:\.\d+)?-flash/i;
+const GEMINI_35_FLASH_LOW_MODEL = "gemini-3.5-flash-low";
+const GEMINI_35_FLASH_HIGH_MODEL = "gemini-3-flash-agent";
+const GEMINI_35_FLASH_REGEX = /^gemini-3\.5-flash(?:-(low|high))?$/i;
+const GEMINI_36_FLASH_REGEX = /^gemini-3\.6-flash(?:-(low|medium|high))?$/i;
+const GEMINI_37_FLASH_REGEX = /^gemini-3\.7-flash(?:-(low|medium|high))?$/i;
+const GEMINI_38_FLASH_REGEX = /^gemini-3\.8-flash(?:-(low|medium|high))?$/i;
 
 // ANTIGRAVITY_ONLY_MODELS removed - all models now default to antigravity
 
@@ -138,6 +144,79 @@ function isGemini3FlashModel(model: string): boolean {
 }
 
 /**
+ * Cloud Code does not expose a bare `gemini-3.5-flash` backend id.
+ * Antigravity/agy resolves the UI model to these advertised ids instead.
+ */
+export function resolveAntigravityGemini35FlashBackendModel(
+  model: string,
+  thinkingLevel?: string,
+): string | undefined {
+  const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+  const match = modelWithoutQuota.match(GEMINI_35_FLASH_REGEX);
+  if (!match) {
+    return undefined;
+  }
+  const level = (thinkingLevel ?? match[1] ?? "low").toLowerCase();
+  return level === "high" ? GEMINI_35_FLASH_HIGH_MODEL : GEMINI_35_FLASH_LOW_MODEL;
+}
+
+/**
+ * Resolves Gemini 3.6 Flash to backend model ID with tier suffix.
+ * Backend expects gemini-3.6-flash-{low|medium|high}.
+ */
+export function resolveAntigravityGemini36FlashBackendModel(
+  model: string,
+  thinkingLevel?: string,
+): string | undefined {
+  const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+  const match = modelWithoutQuota.match(GEMINI_36_FLASH_REGEX);
+  if (!match) {
+    return undefined;
+  }
+  const level = (thinkingLevel ?? match[1] ?? "low").toLowerCase();
+  const validLevel = ["low", "medium", "high"].includes(level) ? level : "low";
+  return `gemini-3.6-flash-${validLevel}`;
+}
+
+/**
+ * Resolves Gemini 3.7 Flash to backend model ID with tier suffix.
+ * Backend expects gemini-3.7-flash-{low|medium|high} — valid when the
+ * request carries the official Antigravity CLI User-Agent (see request.ts).
+ */
+export function resolveAntigravityGemini37FlashBackendModel(
+  model: string,
+  thinkingLevel?: string,
+): string | undefined {
+  const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+  const match = modelWithoutQuota.match(GEMINI_37_FLASH_REGEX);
+  if (!match) {
+    return undefined;
+  }
+  const level = (thinkingLevel ?? match[1] ?? "low").toLowerCase();
+  const validLevel = ["low", "medium", "high"].includes(level) ? level : "low";
+  return `gemini-3.7-flash-${validLevel}`;
+}
+
+/**
+ * Resolves Gemini 3.8 Flash to backend model ID with tier suffix.
+ * Backend expects gemini-3.8-flash-{low|medium|high} — valid when the
+ * request carries the official Antigravity CLI User-Agent (see request.ts).
+ */
+export function resolveAntigravityGemini38FlashBackendModel(
+  model: string,
+  thinkingLevel?: string,
+): string | undefined {
+  const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+  const match = modelWithoutQuota.match(GEMINI_38_FLASH_REGEX);
+  if (!match) {
+    return undefined;
+  }
+  const level = (thinkingLevel ?? match[1] ?? "low").toLowerCase();
+  const validLevel = ["low", "medium", "high"].includes(level) ? level : "low";
+  return `gemini-3.8-flash-${validLevel}`;
+}
+
+/**
  * Resolves a model name with optional tier suffix and quota prefix to its actual API model name
  * and corresponding thinking configuration.
  *
@@ -167,10 +246,8 @@ export function resolveModelWithTier(requestedModel: string, options: ModelResol
   const isImageModel = IMAGE_GENERATION_MODELS.test(modelWithoutQuota);
   const isClaudeModel = modelWithoutQuota.toLowerCase().includes("claude");
   
-  // All models default to Antigravity quota unless cli_first is enabled
-  // Fallback to gemini-cli happens at the account rotation level when Antigravity is exhausted
-  const preferGeminiCli = options.cli_first === true && !isAntigravity && !isImageModel && !isClaudeModel;
-  const quotaPreference = preferGeminiCli ? "gemini-cli" as const : "antigravity" as const;
+  // All models strictly route to Antigravity quota
+  const quotaPreference = "antigravity" as const;
   const explicitQuota = isAntigravity || isImageModel;
 
   const isGemini3 = modelWithoutQuota.toLowerCase().startsWith("gemini-3");
@@ -309,7 +386,7 @@ function budgetToGemini3Level(budget: number): "low" | "medium" | "high" {
  */
 export function resolveModelForHeaderStyle(
   requestedModel: string,
-  headerStyle: "antigravity" | "gemini-cli"
+  headerStyle: "antigravity" = "antigravity"
 ): ResolvedModel {
   const lower = requestedModel.toLowerCase();
   const isGemini3 = lower.includes("gemini-3");
@@ -318,42 +395,22 @@ export function resolveModelForHeaderStyle(
     return resolveModelWithTier(requestedModel);
   }
 
-  if (headerStyle === "antigravity") {
-    let transformedModel = requestedModel
-      .replace(/-preview-customtools$/i, "")
-      .replace(/-preview$/i, "")
-      .replace(/^antigravity-/i, "");
-    
-    const isGemini3Pro = isGemini3ProModel(transformedModel);
-    const hasTierSuffix = /-(low|medium|high)$/i.test(transformedModel);
-    const isImageModel = IMAGE_GENERATION_MODELS.test(transformedModel);
-    
-    // Don't add tier suffix to image models - they don't support thinking
-    if (isGemini3Pro && !hasTierSuffix && !isImageModel) {
-      transformedModel = `${transformedModel}-low`;
-    }
-    
-    const prefixedModel = `antigravity-${transformedModel}`;
-    return resolveModelWithTier(prefixedModel);
+  let transformedModel = requestedModel
+    .replace(/-preview-customtools$/i, "")
+    .replace(/-preview$/i, "")
+    .replace(/^antigravity-/i, "");
+  
+  const isGemini3Pro = isGemini3ProModel(transformedModel);
+  const hasTierSuffix = /-(low|medium|high)$/i.test(transformedModel);
+  const isImageModel = IMAGE_GENERATION_MODELS.test(transformedModel);
+  
+  // Don't add tier suffix to image models - they don't support thinking
+  if (isGemini3Pro && !hasTierSuffix && !isImageModel) {
+    transformedModel = `${transformedModel}-low`;
   }
   
-  if (headerStyle === "gemini-cli") {
-    let transformedModel = requestedModel
-      .replace(/^antigravity-/i, "")
-      .replace(/-(low|medium|high)$/i, "");
-
-    const hasPreviewSuffix = /-preview($|-)/i.test(transformedModel);
-    if (!hasPreviewSuffix) {
-      transformedModel = `${transformedModel}-preview`;
-    }
-    
-    return {
-      ...resolveModelWithTier(transformedModel),
-      quotaPreference: "gemini-cli",
-    };
-  }
-
-  return resolveModelWithTier(requestedModel);
+  const prefixedModel = `antigravity-${transformedModel}`;
+  return resolveModelWithTier(prefixedModel);
 }
 
 /**

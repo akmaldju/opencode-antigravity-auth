@@ -124,8 +124,8 @@ function getBindAddress(): string {
     return "127.0.0.1";
   }
   
-  // WSL and remote environments need 0.0.0.0 to be reachable
-  if (isWSL() || isRemoteEnvironment()) {
+  // WSL needs 0.0.0.0 to be reachable from the Windows host browser
+  if (isWSL()) {
     return "0.0.0.0";
   }
   

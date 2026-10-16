@@ -5,7 +5,7 @@
  * Root cause: loadAccounts() returning null is treated as "no accounts"
  * even when the file exists but couldn't be read (permissions, corruption, etc.)
  * 
- * @see https://github.com/NoeFabris/opencode-antigravity-auth/issues/89
+ * @see https://github.com/JoshRob297/opencode-antigravity-auth/issues/89
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
@@ -183,7 +183,7 @@ describe("loadAccounts", () => {
 
 describe("saveAccounts", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   it("saves valid storage to disk", async () => {
