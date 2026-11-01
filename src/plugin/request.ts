@@ -67,6 +67,7 @@ import {
   resolveAntigravityGemini36FlashBackendModel,
   resolveAntigravityGemini37FlashBackendModel,
   resolveAntigravityGemini38FlashBackendModel,
+  resolveAntigravityClaude55BackendModel,
   isClaudeModel,
   isClaudeThinkingModel,
   CLAUDE_THINKING_MAX_OUTPUT_TOKENS,
@@ -932,6 +933,15 @@ export function prepareAntigravityRequest(
               if (gemini36FlashBackendModel) {
                 effectiveModel = gemini36FlashBackendModel;
                 wrappedBody.model = gemini36FlashBackendModel;
+              } else {
+                const claude55Tier = tierThinkingLevel ?? (typeof tierThinkingBudget === "number"
+                  ? (tierThinkingBudget <= 8192 ? "low" : tierThinkingBudget <= 16384 ? "medium" : "high")
+                  : "high");
+                const claude55BackendModel = resolveAntigravityClaude55BackendModel(rawModel, claude55Tier);
+                if (claude55BackendModel) {
+                  effectiveModel = claude55BackendModel;
+                  wrappedBody.model = claude55BackendModel;
+                }
               }
             }
           }
@@ -1029,6 +1039,14 @@ export function prepareAntigravityRequest(
               const gemini36FlashBackendModel = resolveAntigravityGemini36FlashBackendModel(rawModel, tierThinkingLevel);
               if (gemini36FlashBackendModel) {
                 effectiveModel = gemini36FlashBackendModel;
+              } else {
+                const claude55Tier = tierThinkingLevel ?? (typeof tierThinkingBudget === "number"
+                  ? (tierThinkingBudget <= 8192 ? "low" : tierThinkingBudget <= 16384 ? "medium" : "high")
+                  : "high");
+                const claude55BackendModel = resolveAntigravityClaude55BackendModel(rawModel, claude55Tier);
+                if (claude55BackendModel) {
+                  effectiveModel = claude55BackendModel;
+                }
               }
             }
           }

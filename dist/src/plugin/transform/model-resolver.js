@@ -175,6 +175,20 @@ export function resolveAntigravityGemini38FlashBackendModel(model, thinkingLevel
     return `gemini-3.8-flash-${validLevel}`;
 }
 /**
+ * Resolves Claude 5.5 models to backend model ID with tier suffix.
+ * Backend expects claude-{opus|sonnet}-5-5-{low|medium|high}.
+ */
+export function resolveAntigravityClaude55BackendModel(model, thinkingTier) {
+    const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+    const match = modelWithoutQuota.match(/^claude-(opus|sonnet)-5-5(?:-thinking)?(?:-(low|medium|high))?$/i);
+    if (!match)
+        return undefined;
+    const family = match[1];
+    const tier = (thinkingTier ?? match[3] ?? "high").toLowerCase();
+    const validTier = ["low", "medium", "high"].includes(tier) ? tier : "high";
+    return `claude-${family}-5-5-${validTier}`;
+}
+/**
  * Resolves a model name with optional tier suffix and quota prefix to its actual API model name
  * and corresponding thinking configuration.
  *

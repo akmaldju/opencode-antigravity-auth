@@ -72,6 +72,11 @@ export declare function resolveAntigravityGemini37FlashBackendModel(model: strin
  */
 export declare function resolveAntigravityGemini38FlashBackendModel(model: string, thinkingLevel?: string): string | undefined;
 /**
+ * Resolves Claude 5.5 models to backend model ID with tier suffix.
+ * Backend expects claude-{opus|sonnet}-5-5-{low|medium|high}.
+ */
+export declare function resolveAntigravityClaude55BackendModel(model: string, thinkingTier?: string): string | undefined;
+/**
  * Resolves a model name with optional tier suffix and quota prefix to its actual API model name
  * and corresponding thinking configuration.
  *

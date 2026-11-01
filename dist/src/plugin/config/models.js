@@ -13,8 +13,8 @@ export const OPENCODE_MODEL_DEFINITIONS = {
             high: { thinkingLevel: "high" },
         },
     },
-    "antigravity-claude-sonnet-4-6": {
-        name: "Claude Sonnet 4.6 (Antigravity)",
+    "antigravity-claude-sonnet-5-5-thinking": {
+        name: "Claude Sonnet 5.5 (Antigravity)",
         limit: { context: 200000, output: 64000 },
         modalities: DEFAULT_MODALITIES,
         // NOTE: Sonnet is treated as a non-thinking model (isClaudeThinkingModel requires
@@ -27,8 +27,8 @@ export const OPENCODE_MODEL_DEFINITIONS = {
             max: { thinkingConfig: { thinkingBudget: 32768 } },
         },
     },
-    "antigravity-claude-opus-4-6-thinking": {
-        name: "Claude Opus 4.6 Thinking (Antigravity)",
+    "antigravity-claude-opus-5-5-thinking": {
+        name: "Claude Opus 5.5 Thinking (Antigravity)",
         limit: { context: 200000, output: 64000 },
         modalities: DEFAULT_MODALITIES,
         variants: {

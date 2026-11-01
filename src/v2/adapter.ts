@@ -1124,7 +1124,7 @@ export async function setupV2(context: V2Context): Promise<CleanupFunction | voi
               const accountList = count > 0
                 ? storage!.accounts.map((a, i) => `  ${i + 1}. ${a.email || "Account " + (i + 1)}`).join("\n")
                 : "  (Sin cuentas configuradas todavía - ejecuta `opencode auth login` para agregar una)";
-              const report = `Antigravity configurado con éxito en: ${res.configPath}\n\nCuentas activas (${count}):\n${accountList}\n\nModelos disponibles:\n• google/antigravity-gemini-3.8-flash (default)\n• google/antigravity-claude-sonnet-4-6\n• google/antigravity-claude-opus-4-6-thinking\n• google/antigravity-gpt-oss-120b-medium`;
+              const report = `Antigravity configurado con éxito en: ${res.configPath}\n\nCuentas activas (${count}):\n${accountList}\n\nModelos disponibles:\n• google/antigravity-gemini-3.8-flash (default)\n• google/antigravity-claude-sonnet-5-5-thinking\n• google/antigravity-claude-opus-5-5-thinking\n• google/antigravity-gpt-oss-120b-medium`;
               await deliver(sessionID, report, delivery);
             } else {
               await deliver(sessionID, `Error al configurar: ${res.error}`, delivery);

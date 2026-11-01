@@ -13,7 +13,7 @@
 > - **Paying the Ultra / Enterprise difference for Argon is not worth it today.** Argon has not demonstrated the value Google claims: on real repository work we cannot reproduce a quality gain over the current workhorse that justifies a frontier-tier price, and paying the tier would still not fix the Antigravity backend, which keeps treating the account as `free-tier`.
 > - **Recommended daily workhorse: Gemini 3.8 Flash.** It is the only Gemini model left on consumer plans, is very fast at generating code, and is free at the margin with Antigravity credentials. Use it for high-volume, low-risk work and escalate to a frontier model (e.g. **DeepSeek**) when output quality is the actual constraint.
 > - On the same **2026-10-13** change, **Gemini 3.7 Flash, 3.6 Flash and 3.1 Pro moved to Enterprise-only**, leaving consumer plans with **Gemini 3.8 Flash** as the only Gemini model. **Gemini 3.5 Pro** has still not shipped.
-> - The Antigravity backend stays unreliable for paid plans: the tier is recognized (`paidTier = g1-pro-tier`) but not applied (`currentTier = free-tier`), Claude 5.5 is unavailable, and Claude 4.6 + GPT-OSS-120b are scheduled for removal on **2026-11-02**.
+> - The Antigravity backend stays unreliable for paid plans: the tier is recognized (`paidTier = g1-pro-tier`) but not applied (`currentTier = free-tier`), Claude 4.6 has been removed; Claude 5.5 is now the supported Claude tier via Antigravity.
 >
 > Argon support will be reconsidered only when one of these changes: (a) the Antigravity backend exposes Argon to consumer plans, (b) an Ultra / Enterprise account becomes available for end-to-end verification, or (c) Argon shows a measurable advantage over the current workhorse on real repository tasks.
 >
@@ -39,7 +39,7 @@
 - **Legacy `gemini-cli` Mode Removed (Definitive 403 `#3501` Fix)**: Completely stripped legacy VS Code headers and `-preview` model fallbacks. All requests route cleanly through official Antigravity CLI signatures (`aidev_client`), eliminating false license errors across all accounts.
 - **Configurable Safety Settings (`safety_level`)**: Uses Google's native moderation baseline by default (`medium` / `BLOCK_MEDIUM_AND_ABOVE`) to protect accounts, with configurable options for `high` and `none` (with explicit disclaimer).
 - **Fixed 403 `#3501` (`SUBSCRIPTION_REQUIRED`) on Flash**: Removed decommissioned sandbox `autopush` endpoint from fallbacks so all requests route cleanly to live `daily` and `prod` endpoints.
-- **Deprecated Gemini 3.5 Flash Removed**: Fully removed `antigravity-gemini-3.5-flash` following Google's backend sunset, keeping only active models (Gemini 3.8 Flash, 3.7 Flash, 3.6 Flash, 3.1 Pro, and Claude 4.6).
+- **Deprecated Gemini 3.5 Flash Removed**: Fully removed `antigravity-gemini-3.5-flash` following Google's backend sunset, keeping only active models (Gemini 3.8 Flash, 3.7 Flash, 3.6 Flash, 3.1 Pro, and Claude 5.5).
 - **Clean Install Model Whitelisting**: Automatically injects a strict `provider.google.whitelist` in `opencode.json` on clean setup, hiding 18+ unauthenticated built-in Google AI Studio/Vertex models from the OpenCode model selector.
 - **In-Flight 403 `#3501` (`SUBSCRIPTION_REQUIRED`) Auto-Recovery**: Intercepts project resolution failures and immediately provisions/links the companion project via `onboardManagedProject` without crashing the active agent session.
 - **Auto-Update Commands**: Includes `/antigravity-update` slash command and CLI updater (`antigravity-update`) for one-click plugin updates.
@@ -60,11 +60,11 @@
 
 ---
 
-Enable OpenCode to authenticate against **Antigravity** (Google's IDE) via OAuth so you can use Antigravity rate limits and access models like `gemini-3.8-flash`, `claude-sonnet-4-6`, `claude-opus-4-6-thinking` and `gpt-oss-120b` with your Google credentials.
+Enable OpenCode to authenticate against **Antigravity** (Google's IDE) via OAuth so you can use Antigravity rate limits and access models like `gemini-3.8-flash`, `claude-sonnet-5-5-thinking`, `claude-opus-5-5-thinking` and `gpt-oss-120b` with your Google credentials.
 
 ## What You Get
 
-- **Gemini 3.8 Flash**, **Claude Opus 4.6 / Sonnet 4.6** and **GPT-OSS 120B** via Google OAuth - this is the complete consumer catalog; **Gemini 3.7 Flash, 3.6 Flash and 3.1 Pro are Ultra / Enterprise-only** and no longer registered
+- **Gemini 3.8 Flash**, **Claude Opus 5.5 / Sonnet 5.5** and **GPT-OSS 120B** via Google OAuth - this is the complete consumer catalog; **Gemini 3.7 Flash, 3.6 Flash and 3.1 Pro are Ultra / Enterprise-only** and no longer registered
 - **Multi-account support** — add multiple Google accounts, auto-rotates when rate-limited
 - **Request Normalization & Clean Feedback** — optimized parameters prevent false-positives on development tasks; clean one-line message on filter notices
 - **Slash Commands** — `/antigravity-quota` to inspect dual-window limits, and `/antigravity-stats` for instant local metrics
@@ -187,8 +187,8 @@ Then in `~/.config/opencode/opencode.json`:
 | Model | Variants | Description |
 |---|---|---|
 | `antigravity-gemini-3.8-flash` | `low`, `medium`, `high` | **Gemini 3.8 Flash** with thinking tiers *(Default)* |
-| `antigravity-claude-sonnet-4-6` | `low`, `medium`, `high`, `max` | Claude Sonnet 4.6 |
-| `antigravity-claude-opus-4-6-thinking` | `low`, `medium`, `high`, `max` | Claude Opus 4.6 with extended thinking |
+| `antigravity-claude-sonnet-5-5-thinking` | `low`, `medium`, `high`, `max` | Claude Sonnet 5.5 with extended thinking |
+| `antigravity-claude-opus-5-5-thinking` | `low`, `medium`, `high`, `max` | Claude Opus 5.5 with extended thinking |
 | `antigravity-gpt-oss-120b-medium` | `low`, `medium`, `high` | GPT-OSS 120B open-source model |
 
 ---
@@ -215,13 +215,13 @@ In OpenCode v2 this is **not required** because the plugin registers all models 
             "high": { "thinkingLevel": "high" }
           }
         },
-        "antigravity-claude-sonnet-4-6": {
-          "name": "Claude Sonnet 4.6 (Antigravity)",
+        "antigravity-claude-sonnet-5-5-thinking": {
+          "name": "Claude Sonnet 5.5 (Antigravity)",
           "limit": { "context": 200000, "output": 64000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
-        "antigravity-claude-opus-4-6-thinking": {
-          "name": "Claude Opus 4.6 Thinking (Antigravity)",
+        "antigravity-claude-opus-5-5-thinking": {
+          "name": "Claude Opus 5.5 Thinking (Antigravity)",
           "limit": { "context": 200000, "output": 64000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
           "variants": {
