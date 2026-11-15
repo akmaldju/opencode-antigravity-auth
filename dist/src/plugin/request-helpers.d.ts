@@ -44,7 +44,7 @@ export interface ThinkingConfig {
 export declare const DEFAULT_THINKING_BUDGET = 16000;
 /**
  * Checks if a model name indicates thinking/reasoning capability.
- * Models with "thinking", "gemini-3", or "opus" in their name support extended thinking.
+ * Models with "thinking", "gemini-3", "gemini-4", or "opus" in their name support extended thinking.
  */
 export declare function isThinkingCapableModel(modelName: string): boolean;
 /**

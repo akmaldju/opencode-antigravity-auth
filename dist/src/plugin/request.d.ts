@@ -1,7 +1,7 @@
 import { type HeaderStyle } from "../constants";
 import { createStreamingTransformer, transformSseLine, transformStreamingPayload } from "./core/streaming";
 import { type AntigravityDebugContext } from "./debug";
-import { type Fingerprint } from "./fingerprint";
+import type { Fingerprint } from "./fingerprint";
 import type { GoogleSearchConfig } from "./transform/types";
 declare function buildSignatureSessionKey(sessionId: string, model?: string, conversationKey?: string, projectKey?: string): string;
 declare function hashConversationSeed(seed: string): string;
@@ -10,6 +10,15 @@ declare function extractConversationSeedFromMessages(messages: any[]): string;
 declare function extractConversationSeedFromContents(contents: any[]): string;
 declare function resolveConversationKey(requestPayload: Record<string, unknown>): string | undefined;
 declare function resolveProjectKey(candidate?: unknown, fallback?: string): string | undefined;
+/**
+ * Cloud Code rejects a request carrying the literal tool path
+ * `tools.opencode.session_move` with a canned 429 ("Resource has been
+ * exhausted"), which poisons the whole session. OpenCode writes that path into
+ * its Code Mode system prompt, so every request fails until it is rewritten.
+ * The renamed path is documentation only: the tool keeps its real name.
+ */
+export declare const SESSION_MOVE_PROMPT_TOKEN = "tools.opencode.session_move";
+export declare const SESSION_MOVE_PROMPT_TOKEN_SAFE = "tools.opencode.session_relocate";
 declare function isGeminiToolUsePart(part: any): boolean;
 declare function isGeminiThinkingPart(part: any): boolean;
 declare function ensureThoughtSignature(part: any, sessionId: string): any;

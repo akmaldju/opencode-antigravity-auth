@@ -732,12 +732,13 @@ export const DEFAULT_THINKING_BUDGET = 16000;
 
 /**
  * Checks if a model name indicates thinking/reasoning capability.
- * Models with "thinking", "gemini-3", or "opus" in their name support extended thinking.
+ * Models with "thinking", "gemini-3", "gemini-4", or "opus" in their name support extended thinking.
  */
 export function isThinkingCapableModel(modelName: string): boolean {
   const lowerModel = modelName.toLowerCase();
   return lowerModel.includes("thinking")
     || lowerModel.includes("gemini-3")
+    || lowerModel.includes("gemini-4")
     || lowerModel.includes("opus");
 }
 

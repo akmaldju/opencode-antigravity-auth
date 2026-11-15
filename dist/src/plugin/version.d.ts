@@ -1,18 +1,28 @@
 /**
- * Remote Antigravity version fetcher.
+ * Remote Antigravity Hub version fetcher.
  *
- * Mirrors the Antigravity-Manager's version resolution strategy:
- *   1. Auto-updater API (plain text with semver)
- *   2. Changelog page scrape (first 5000 chars)
- *   3. Hardcoded fallback in constants.ts
+ * Resolution strategy:
+ *   1. Hub auto-updater manifest (electron-builder YAML, `version:` field)
+ *   2. Hardcoded fallback in constants.ts
  *
- * Called once at plugin startup to ensure headers use the latest
- * supported version, avoiding "version no longer supported" errors.
+ * Manifest versions below ANTIGRAVITY_MINIMUM_VERSION are rejected because Cloud
+ * Code no longer serves newer models to those clients. Selecting a version below
+ * the minimum is what produced the "This version of Antigravity is no longer
+ * supported" answer on every request.
  *
- * @see https://github.com/lbjlaq/Antigravity-Manager (src-tauri/src/constants.rs)
+ * @see https://github.com/router-for-me/CLIProxyAPI (internal/misc/antigravity_version.go)
  */
+export declare const ANTIGRAVITY_HUB_MANIFEST_URL = "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml";
+/** Returns true for plain `major.minor.patch` versions (no prefixes, suffixes, pre-release tags). */
+export declare function isStrictVersion(value: string): boolean;
+/** Compares two strict versions numerically. */
+export declare function compareVersions(a: string, b: string): number;
+/** True when the version is strict and at least the Cloud Code minimum. */
+export declare function isSupportedAntigravityVersion(version: string): boolean;
+/** Reads the `version:` field out of an electron-builder update manifest. */
+export declare function parseManifestVersion(manifest: string): string | null;
 /**
- * Fetch the latest Antigravity version and update the global constant.
+ * Fetch the latest supported Antigravity version and update the global constant.
  * Safe to call before logger is initialized (will silently skip logging).
  */
 export declare function initAntigravityVersion(): Promise<void>;

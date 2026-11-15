@@ -8,6 +8,7 @@ import {
   ANTIGRAVITY_ENDPOINT_FALLBACKS,
   ANTIGRAVITY_LOAD_ENDPOINTS,
   getAntigravityHeaders,
+  ANTIGRAVITY_CLIENT_METADATA,
 } from "../constants";
 import { createLogger } from "../plugin/logger";
 import { calculateTokenExpiry } from "../plugin/auth";
@@ -134,7 +135,7 @@ async function fetchProjectID(accessToken: string): Promise<string> {
     Authorization: `Bearer ${accessToken}`,
     "Content-Type": "application/json",
     "User-Agent": "antigravity",
-    "Client-Metadata": getAntigravityHeaders()["Client-Metadata"],
+    "Client-Metadata": ANTIGRAVITY_CLIENT_METADATA,
   };
 
   const loadEndpoints = Array.from(

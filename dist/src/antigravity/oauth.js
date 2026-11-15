@@ -1,5 +1,5 @@
 import { generatePKCE } from "@openauthjs/openauth/pkce";
-import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET, ANTIGRAVITY_REDIRECT_URI, ANTIGRAVITY_SCOPES, ANTIGRAVITY_ENDPOINT_FALLBACKS, ANTIGRAVITY_LOAD_ENDPOINTS, getAntigravityHeaders, } from "../constants";
+import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET, ANTIGRAVITY_REDIRECT_URI, ANTIGRAVITY_SCOPES, ANTIGRAVITY_ENDPOINT_FALLBACKS, ANTIGRAVITY_LOAD_ENDPOINTS, getAntigravityHeaders, ANTIGRAVITY_CLIENT_METADATA, } from "../constants";
 import { createLogger } from "../plugin/logger";
 import { calculateTokenExpiry } from "../plugin/auth";
 const log = createLogger("oauth");
@@ -63,7 +63,7 @@ async function fetchProjectID(accessToken) {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
         "User-Agent": "antigravity",
-        "Client-Metadata": getAntigravityHeaders()["Client-Metadata"],
+        "Client-Metadata": ANTIGRAVITY_CLIENT_METADATA,
     };
     const loadEndpoints = Array.from(new Set([...ANTIGRAVITY_LOAD_ENDPOINTS, ...ANTIGRAVITY_ENDPOINT_FALLBACKS]));
     for (const baseEndpoint of loadEndpoints) {

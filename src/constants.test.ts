@@ -1,44 +1,44 @@
 import { describe, it, expect } from "vitest";
 import {
   getRandomizedHeaders,
+  getAntigravityUserAgent,
   ANTIGRAVITY_HEADERS,
-  type HeaderSet,
+  ANTIGRAVITY_MINIMUM_VERSION,
+  ANTIGRAVITY_VERSION_FALLBACK,
 } from "./constants.ts";
 
 describe("ANTIGRAVITY_HEADERS", () => {
-  it("matches Antigravity header structure", () => {
-    expect(ANTIGRAVITY_HEADERS["User-Agent"]).toContain("Antigravity/");
-    expect(ANTIGRAVITY_HEADERS["X-Goog-Api-Client"]).toBe("google-cloud-sdk vscode_cloudshelleditor/0.1");
-    expect(ANTIGRAVITY_HEADERS["Client-Metadata"]).toContain("ANTIGRAVITY");
+  it("sends only the Hub User-Agent", () => {
+    expect(ANTIGRAVITY_HEADERS["User-Agent"]).toContain("antigravity/hub/");
+    expect(Object.keys(ANTIGRAVITY_HEADERS)).toEqual(["User-Agent"]);
+  });
+});
+
+describe("getAntigravityUserAgent", () => {
+  it("carries the runtime version and the Hub build changelist", () => {
+    expect(getAntigravityUserAgent("2.24.0")).toBe(
+      "antigravity/hub/2.24.0 (aidev_client; os_type=darwin; arch=arm64; cl=1000335682)",
+    );
+  });
+
+  it("reports a version no older than the Cloud Code minimum", () => {
+    const [major, minor] = ANTIGRAVITY_VERSION_FALLBACK.split(".").map(Number);
+    const [minMajor, minMinor] = ANTIGRAVITY_MINIMUM_VERSION.split(".").map(Number);
+    expect(major! * 1000 + minor!).toBeGreaterThanOrEqual(minMajor! * 1000 + minMinor!);
+  });
+
+  it("omits the changelist for a release with no known CL", () => {
+    expect(getAntigravityUserAgent("2.99.0")).toBe(
+      "antigravity/hub/2.99.0 (aidev_client; os_type=darwin; arch=arm64)",
+    );
   });
 });
 
 describe("getRandomizedHeaders", () => {
-  describe("antigravity style", () => {
-    it("returns all three headers", () => {
-      const headers = getRandomizedHeaders("antigravity");
-      expect(headers["User-Agent"]).toBeDefined();
-      expect(headers["X-Goog-Api-Client"]).toBeDefined();
-      expect(headers["Client-Metadata"]).toBeDefined();
-    });
-
-    it("returns User-Agent in antigravity format", () => {
-      const headers = getRandomizedHeaders("antigravity");
-      expect(headers["User-Agent"]).toMatch(/^antigravity\//);
-    });
-
-    it("aligns Client-Metadata platform with User-Agent platform", () => {
-      for (let i = 0; i < 50; i++) {
-        const headers = getRandomizedHeaders("antigravity");
-        const ua = headers["User-Agent"]!;
-        const meta = headers["Client-Metadata"]!;
-
-        if (ua.includes("windows")) {
-          expect(meta).toContain('"platform":"WINDOWS"');
-        } else if (ua.includes("darwin")) {
-          expect(meta).toContain('"platform":"MACOS"');
-        }
-      }
-    });
+  it("matches the Hub User-Agent with no content-call metadata", () => {
+    const headers = getRandomizedHeaders("antigravity");
+    expect(headers["User-Agent"]).toMatch(/^antigravity\/hub\//);
+    expect(headers["X-Goog-Api-Client"]).toBeUndefined();
+    expect(headers["Client-Metadata"]).toBeUndefined();
   });
 });

@@ -79,7 +79,7 @@ describe("updateOpencodeConfig", () => {
     expect(writtenConfig.provider.google.models["old-model"]).toBeUndefined();
     // New models should be present
     expect(writtenConfig.provider.google.models["antigravity-gemini-3.8-flash"]).toBeDefined();
-    expect(writtenConfig.provider.google.models["antigravity-claude-sonnet-4-6"]).toBeDefined();
+    expect(writtenConfig.provider.google.models["antigravity-claude-sonnet-5-5-thinking"]).toBeDefined();
     expect(writtenConfig.provider.google.models["antigravity-gemini-3.5-flash"]).toBeUndefined();
     // Whitelist should be updated
     expect(writtenConfig.provider.google.whitelist).toContain("antigravity-gemini-3.8-flash");

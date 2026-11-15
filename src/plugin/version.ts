@@ -1,42 +1,81 @@
 /**
- * Remote Antigravity version fetcher.
+ * Remote Antigravity Hub version fetcher.
  *
- * Mirrors the Antigravity-Manager's version resolution strategy:
- *   1. Auto-updater API (plain text with semver)
- *   2. Changelog page scrape (first 5000 chars)
- *   3. Hardcoded fallback in constants.ts
+ * Resolution strategy:
+ *   1. Hub auto-updater manifest (electron-builder YAML, `version:` field)
+ *   2. Hardcoded fallback in constants.ts
  *
- * Called once at plugin startup to ensure headers use the latest
- * supported version, avoiding "version no longer supported" errors.
+ * Manifest versions below ANTIGRAVITY_MINIMUM_VERSION are rejected because Cloud
+ * Code no longer serves newer models to those clients. Selecting a version below
+ * the minimum is what produced the "This version of Antigravity is no longer
+ * supported" answer on every request.
  *
- * @see https://github.com/lbjlaq/Antigravity-Manager (src-tauri/src/constants.rs)
+ * @see https://github.com/router-for-me/CLIProxyAPI (internal/misc/antigravity_version.go)
  */
 
-import { getAntigravityVersion, setAntigravityVersion } from "../constants";
+import {
+  ANTIGRAVITY_MINIMUM_VERSION,
+  getAntigravityVersion,
+  setAntigravityVersion,
+} from "../constants";
 import { createLogger } from "./logger";
 
-const VERSION_URL = "https://antigravity-auto-updater-974169037036.us-central1.run.app";
-const CHANGELOG_URL = "https://antigravity.google/changelog";
+export const ANTIGRAVITY_HUB_MANIFEST_URL =
+  "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml";
+
+const MANIFEST_HEADERS = {
+  "User-Agent": "electron-builder",
+  "Cache-Control": "no-cache",
+} as const;
 const FETCH_TIMEOUT_MS = 5000;
-const CHANGELOG_SCAN_CHARS = 5000;
-const VERSION_REGEX = /\d+\.\d+\.\d+/;
+const MAX_MANIFEST_BYTES = 4096;
+const STRICT_VERSION_REGEX = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/;
+const VERSION_KEY = "version:";
 
-type VersionSource = "api" | "changelog" | "fallback";
-
-function parseVersion(text: string): string | null {
-  const match = text.match(VERSION_REGEX);
-  return match ? match[0] : null;
+/** Returns true for plain `major.minor.patch` versions (no prefixes, suffixes, pre-release tags). */
+export function isStrictVersion(value: string): boolean {
+  return STRICT_VERSION_REGEX.test(value);
 }
 
-async function tryFetchVersion(url: string, maxChars?: number): Promise<string | null> {
+/** Compares two strict versions numerically. */
+export function compareVersions(a: string, b: string): number {
+  const left = a.split(".").map(Number);
+  const right = b.split(".").map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/** True when the version is strict and at least the Cloud Code minimum. */
+export function isSupportedAntigravityVersion(version: string): boolean {
+  return isStrictVersion(version) && compareVersions(version, ANTIGRAVITY_MINIMUM_VERSION) >= 0;
+}
+
+/** Reads the `version:` field out of an electron-builder update manifest. */
+export function parseManifestVersion(manifest: string): string | null {
+  for (const line of manifest.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith(VERSION_KEY)) continue;
+    const raw = trimmed.slice(VERSION_KEY.length).trim().replace(/^["']|["']$/g, "");
+    if (isStrictVersion(raw)) return raw;
+  }
+  return null;
+}
+
+async function fetchManifestVersion(): Promise<string | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(ANTIGRAVITY_HUB_MANIFEST_URL, {
+      signal: controller.signal,
+      headers: MANIFEST_HEADERS,
+    });
     if (!response.ok) return null;
-    let text = await response.text();
-    if (maxChars) text = text.slice(0, maxChars);
-    return parseVersion(text);
+    const text = (await response.text()).slice(0, MAX_MANIFEST_BYTES);
+    const version = parseManifestVersion(text);
+    return version && isSupportedAntigravityVersion(version) ? version : null;
   } catch {
     return null;
   } finally {
@@ -45,37 +84,23 @@ async function tryFetchVersion(url: string, maxChars?: number): Promise<string |
 }
 
 /**
- * Fetch the latest Antigravity version and update the global constant.
+ * Fetch the latest supported Antigravity version and update the global constant.
  * Safe to call before logger is initialized (will silently skip logging).
  */
 export async function initAntigravityVersion(): Promise<void> {
   const log = createLogger("version");
-  const fallback = getAntigravityVersion();
-  let version: string | null;
-  let source: VersionSource;
+  const previous = getAntigravityVersion();
 
-  // 1. Try auto-updater API
-  version = await tryFetchVersion(VERSION_URL);
-  if (version) {
-    source = "api";
-  } else {
-    // 2. Try changelog page scrape
-    version = await tryFetchVersion(CHANGELOG_URL, CHANGELOG_SCAN_CHARS);
-    if (version) {
-      source = "changelog";
-    } else {
-      // 3. Fall back to hardcoded
-      source = "fallback";
-      setAntigravityVersion(fallback);
-      log.info("version-fetch-failed", { fallback });
-      return;
-    }
+  const version = await fetchManifestVersion();
+  if (!version) {
+    log.info("version-fetch-failed", { fallback: previous });
+    return;
   }
 
-  if (version !== fallback) {
-    log.info("version-updated", { version, source, previous: fallback });
+  if (version !== previous) {
+    log.info("version-updated", { version, source: "manifest", previous });
   } else {
-    log.debug("version-unchanged", { version, source });
+    log.debug("version-unchanged", { version, source: "manifest" });
   }
   setAntigravityVersion(version);
 }

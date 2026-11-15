@@ -365,6 +365,7 @@ export async function setupV2(context) {
                 prepared,
                 family,
                 accountIndex: activeIndex,
+                model: prepared.effectiveModel ?? modelName ?? null,
                 createdAt: Date.now(),
             });
             event.request = new Request(prepared.request, prepared.init);
@@ -406,29 +407,13 @@ export async function setupV2(context) {
                         mgr.markAccountUsed(meta.accountIndex);
                     }
                     else if (isRateLimitedOrQuota) {
-                        // Immediately mark failed account as limited in shared AccountManager & disk cache
-                        mgr.markRateLimitedByIndex(meta.accountIndex, 60_000, meta.family, "antigravity");
-                        // Set cached quota remainingFraction for this family to 0 so next prompt won't reuse it
-                        const familyGroup = meta.family === "claude" ? "claude" : "gemini-flash";
-                        mgr.updateQuotaCache(meta.accountIndex, {
-                            [familyGroup]: { remainingFraction: 0, resetTime: new Date(Date.now() + 3600_000).toISOString() }
-                        });
-                        // Advance activeIndex immediately in storage
-                        const storage = await loadAccounts();
-                        if (storage && storage.accounts.length > 1) {
-                            const nextIdx = (meta.accountIndex + 1) % storage.accounts.length;
-                            storage.activeIndex = nextIdx;
-                            const failedAccount = storage.accounts[meta.accountIndex];
-                            if (failedAccount) {
-                                failedAccount.cachedQuota = {
-                                    ...failedAccount.cachedQuota,
-                                    [familyGroup]: { remainingFraction: 0, resetTime: new Date(Date.now() + 3600_000).toISOString() }
-                                };
-                                failedAccount.cachedQuotaUpdatedAt = Date.now();
-                            }
-                            await saveAccounts(storage).catch(() => { });
-                            log.warn(`[v2 routing] Account idx=${meta.accountIndex} encountered status=${event.response.status}. Switched activeIndex -> ${nextIdx}`);
-                        }
+                        // A 429/403 can belong to a single model - OpenCode also calls a cheap
+                        // model for titles, and a retired one answers 429 for the whole session.
+                        // Mark only the model that failed so the account keeps serving the
+                        // models this session asked for, and leave the quota cache alone:
+                        // retrieveUserQuotaSummary is authoritative and refreshes on its TTL.
+                        mgr.markRateLimitedByIndex(meta.accountIndex, 60_000, meta.family, "antigravity", entry.model ?? undefined);
+                        log.warn(`[v2 routing] Account idx=${meta.accountIndex} answered status=${event.response.status} for model=${entry.model ?? "unknown"}; marked that model for 60s`);
                     }
                 }
                 catch (e) {
@@ -817,7 +802,7 @@ export async function setupV2(context) {
                             const accountList = count > 0
                                 ? storage.accounts.map((a, i) => `  ${i + 1}. ${a.email || "Account " + (i + 1)}`).join("\n")
                                 : "  (Sin cuentas configuradas todavía - ejecuta `opencode auth login` para agregar una)";
-                            const report = `Antigravity configurado con éxito en: ${res.configPath}\n\nCuentas activas (${count}):\n${accountList}\n\nModelos disponibles:\n• google/antigravity-gemini-3.8-flash (default)\n• google/antigravity-claude-sonnet-4-6\n• google/antigravity-claude-opus-4-6-thinking\n• google/antigravity-gpt-oss-120b-medium`;
+                            const report = `Antigravity configurado con éxito en: ${res.configPath}\n\nCuentas activas (${count}):\n${accountList}\n\nModelos disponibles:\n• google/antigravity-gemini-3.8-flash (default)\n• google/antigravity-claude-sonnet-5-5-thinking\n• google/antigravity-claude-opus-5-5-thinking\n• google/antigravity-gpt-oss-120b-medium`;
                             await deliver(sessionID, report, delivery);
                         }
                         else {

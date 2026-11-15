@@ -66,6 +66,8 @@ export const DISCOVERY_DENYLIST: RegExp[] = [
   /^tab_/i, // internal tab preview models
   /-image/i, // image output needs capabilities this catalog does not declare
   /-tiered$/i, // backend mechanic for the curated 3.8 Flash entry, not a user-facing model id
+  /^gemini-4-argon(?:-(?:low|medium|high))?$/i, // curated as antigravity-gemini-4-argon; discovery would only duplicate it
+  /^gemini-4-hydrogen(?:-(?:low|medium|high|xhigh))?$/i, // curated as antigravity-gemini-4-hydrogen
   /^gemini-3\.6-flash/i, // 404 NOT_FOUND
   /^gemini-3\.1-pro/i, // 404 NOT_FOUND
   /^gemini-pro-agent$/i, // 404 NOT_FOUND

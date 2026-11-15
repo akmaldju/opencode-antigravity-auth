@@ -69,6 +69,11 @@ const GEMINI_35_FLASH_REGEX = /^gemini-3\.5-flash(?:-(low|high))?$/i;
 const GEMINI_36_FLASH_REGEX = /^gemini-3\.6-flash(?:-(low|medium|high))?$/i;
 const GEMINI_37_FLASH_REGEX = /^gemini-3\.7-flash(?:-(low|medium|high))?$/i;
 const GEMINI_38_FLASH_REGEX = /^gemini-3\.8-flash(?:-(low|medium|high))?$/i;
+const GEMINI_4_ARGON_REGEX = /^gemini-4-argon(?:-(low|medium|high))?$/i;
+const GEMINI_4_HYDROGEN_REGEX = /^gemini-4-hydrogen(?:-(low|medium|high|xhigh))?$/i;
+
+/** Gemini 4 (Argon/Hydrogen) is served with thinkingLevel like Gemini 3. */
+const GEMINI_4_REGEX = /^gemini-4(?:[.-]|$)/i;
 
 // ANTIGRAVITY_ONLY_MODELS removed - all models now default to antigravity
 
@@ -89,6 +94,7 @@ function supportsThinkingTiers(model: string): boolean {
   const lower = model.toLowerCase();
   return (
     lower.includes("gemini-3") ||
+    lower.includes("gemini-4") ||
     lower.includes("gemini-2.5") ||
     (lower.includes("claude") && lower.includes("thinking"))
   );
@@ -131,6 +137,7 @@ function isThinkingCapableModel(model: string): boolean {
   return (
     lower.includes("thinking") ||
     lower.includes("gemini-3") ||
+    lower.includes("gemini-4") ||
     lower.includes("gemini-2.5")
   );
 }
@@ -214,6 +221,55 @@ export function resolveAntigravityGemini38FlashBackendModel(
   const level = (thinkingLevel ?? match[1] ?? "low").toLowerCase();
   const validLevel = ["low", "medium", "high"].includes(level) ? level : "low";
   return `gemini-3.8-flash-${validLevel}`;
+}
+
+/**
+ * Resolves Gemini 4 Argon to backend model ID with tier suffix.
+ * Backend expects gemini-4-argon-{low|medium|high}; there is no bare id.
+ */
+export function resolveAntigravityGemini4ArgonBackendModel(
+  model: string,
+  thinkingLevel?: string,
+): string | undefined {
+  const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+  const match = modelWithoutQuota.match(GEMINI_4_ARGON_REGEX);
+  if (!match) return undefined;
+  const level = (thinkingLevel ?? match[1] ?? "high").toLowerCase();
+  const validLevel = ["low", "medium", "high"].includes(level) ? level : "high";
+  return `gemini-4-argon-${validLevel}`;
+}
+
+/**
+ * Resolves Gemini 4 Hydrogen to backend model ID with tier suffix.
+ * Backend expects gemini-4-hydrogen-{low|medium|high|xhigh}; there is no bare id.
+ */
+export function resolveAntigravityGemini4HydrogenBackendModel(
+  model: string,
+  thinkingLevel?: string,
+): string | undefined {
+  const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+  const match = modelWithoutQuota.match(GEMINI_4_HYDROGEN_REGEX);
+  if (!match) return undefined;
+  const level = (thinkingLevel ?? match[1] ?? "high").toLowerCase();
+  const validLevel = ["low", "medium", "high", "xhigh"].includes(level) ? level : "high";
+  return `gemini-4-hydrogen-${validLevel}`;
+}
+
+/**
+ * Resolves Claude 5.5 models to backend model ID with tier suffix.
+ * Backend expects claude-{opus|sonnet}-5-5-{low|medium|high}.
+ */
+export function resolveAntigravityClaude55BackendModel(
+  model: string,
+  thinkingTier?: string,
+): string | undefined {
+  const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+  const match = modelWithoutQuota.match(/^claude-(opus|sonnet)-5-5(?:-thinking)?(?:-(low|medium|high))?$/i);
+  if (!match) return undefined;
+  const family = match[1];
+  const tier = (thinkingTier ?? match[3] ?? "high").toLowerCase();
+  const validTier = ["low", "medium", "high"].includes(tier) ? tier : "high";
+  return `claude-${family}-5-5-${validTier}`;
 }
 
 /**

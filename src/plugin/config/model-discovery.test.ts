@@ -26,8 +26,12 @@ import {
 const MEASURED_CATALOG: Array<[id: string, verdict: string]> = [
   ["chat_20706", "http400"],
   ["chat_23310", "http400"],
-  ["claude-opus-4-6-thinking", "OK + tool calls"],
-  ["claude-sonnet-4-6", "OK + tool calls"],
+  ["claude-opus-5-5-high", "OK + tool calls"],
+  ["claude-opus-5-5-low", "OK + tool calls"],
+  ["claude-opus-5-5-medium", "OK + tool calls"],
+  ["claude-sonnet-5-5-high", "OK + tool calls"],
+  ["claude-sonnet-5-5-low", "OK + tool calls"],
+  ["claude-sonnet-5-5-medium", "OK + tool calls"],
   ["gemini-2.5-flash", "OK + tool calls"],
   ["gemini-2.5-flash-lite", "OK + tool calls"],
   ["gemini-2.5-flash-thinking", "OK + tool calls"],
@@ -44,6 +48,9 @@ const MEASURED_CATALOG: Array<[id: string, verdict: string]> = [
   ["gemini-3.6-flash-high", "404"],
   ["gemini-3.6-flash-low", "404"],
   ["gemini-3.6-flash-medium", "404"],
+  ["gemini-3.8-flash-high", "OK + tool calls"],
+  ["gemini-3.8-flash-low", "OK + tool calls"],
+  ["gemini-3.8-flash-medium", "OK + tool calls"],
   ["gemini-3.8-flash-tiered", "tiered"],
   ["gemini-pro-agent", "404"],
   ["gpt-oss-120b-medium", "OK + tool calls"],
@@ -62,11 +69,17 @@ describe("model discovery is forward-only", () => {
     expect(isDiscoverableModelId(id)).toBe(false);
   });
 
-  it("surfaces the Gemini 4 Argon family when the account has it", () => {
-    expect(isDiscoverableModelId("gemini-4-argon")).toBe(true);
-    expect(isDiscoverableModelId("gemini-4-argon-high")).toBe(true);
+  it("surfaces Gemini 4 families the curated catalog does not cover", () => {
     expect(isDiscoverableModelId("gemini-4-flash")).toBe(true);
-    expect(buildDiscoveredModels(["gemini-4-argon"])["antigravity-gemini-4-argon"]).toBeDefined();
+    expect(isDiscoverableModelId("gemini-5-flash")).toBe(true);
+    expect(buildDiscoveredModels(["gemini-4-flash"])["antigravity-gemini-4-flash"]).toBeDefined();
+  });
+
+  it("leaves the curated Gemini 4 entries to the curated catalog", () => {
+    expect(isDiscoverableModelId("gemini-4-argon")).toBe(false);
+    expect(isDiscoverableModelId("gemini-4-argon-high")).toBe(false);
+    expect(isDiscoverableModelId("gemini-4-hydrogen")).toBe(false);
+    expect(isDiscoverableModelId("gemini-4-hydrogen-xhigh")).toBe(false);
   });
 
   it("surfaces Gemini Flash generations newer than the curated floor", () => {
@@ -81,8 +94,8 @@ describe("model discovery is forward-only", () => {
   });
 
   it("keeps the denylist ahead of the version floor", () => {
-    expect(isDiscoverableModelId("gemini-4-argon-image")).toBe(false);
-    expect(isDiscoverableModelId("gemini-4-argon-tiered")).toBe(false);
+    expect(isDiscoverableModelId("gemini-4-flash-image")).toBe(false);
+    expect(isDiscoverableModelId("gemini-4-flash-tiered")).toBe(false);
   });
 
   it("rejects unknown families and malformed ids", () => {
@@ -94,7 +107,7 @@ describe("model discovery is forward-only", () => {
 
 describe("model discovery definitions", () => {
   it("gives Gemini ids Gemini limits and thinking variants", () => {
-    const def = buildDiscoveredModelDefinition("gemini-4-argon");
+    const def = buildDiscoveredModelDefinition("gemini-4-flash-high");
     expect(def.limit).toEqual({ context: 1048576, output: 65536 });
     expect(def.variants?.low).toEqual({ thinkingLevel: "low" });
     expect(def.variants?.high).toEqual({ thinkingLevel: "high" });
@@ -133,10 +146,10 @@ describe("collectDiscoveredModels", () => {
 
   it("adds a newer model when the account has one", async () => {
     vi.mocked(fetchAvailableModels).mockResolvedValue({
-      models: { "gemini-3-flash": {}, "gemini-4-argon": {}, "chat_1": {} },
+      models: { "gemini-3-flash": {}, "gemini-4-flash-high": {}, "chat_1": {} },
     } as never);
     const discovered = await collectDiscoveredModels("token", "project");
-    expect(Object.keys(discovered)).toEqual(["antigravity-gemini-4-argon"]);
+    expect(Object.keys(discovered)).toEqual(["antigravity-gemini-4-flash-high"]);
   });
 
   it("degrades to an empty result instead of throwing", async () => {
