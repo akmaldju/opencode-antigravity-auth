@@ -40,7 +40,26 @@ export declare const ANTIGRAVITY_ENDPOINT = "https://daily-cloudcode-pa.sandbox.
  * Hardcoded project id used when Antigravity does not return one (e.g., business/workspace accounts).
  */
 export declare const ANTIGRAVITY_DEFAULT_PROJECT_ID = "rising-fact-p41fc";
-export declare const ANTIGRAVITY_VERSION_FALLBACK = "1.18.3";
+/**
+ * Cloud Code only serves newer models (Gemini 4 Argon included) to Antigravity Hub
+ * clients at or above this version. Older clients are answered with
+ * "This version of Antigravity is no longer supported" instead of a model response.
+ */
+export declare const ANTIGRAVITY_MINIMUM_VERSION = "2.23.0";
+/**
+ * Hub release reported when the update manifest is unreachable. Keep it at or above
+ * ANTIGRAVITY_MINIMUM_VERSION and update it together with ANTIGRAVITY_HUB_CHANGELISTS.
+ */
+export declare const ANTIGRAVITY_VERSION_FALLBACK = "2.24.0";
+/**
+ * Build changelists of specific Hub releases. Releases without a known CL omit the
+ * cl= field instead of claiming another build's CL.
+ */
+export declare const ANTIGRAVITY_HUB_CHANGELISTS: Readonly<Record<string, string>>;
+/** Platform the Hub's update manifest is published for, and the UA reports. */
+export declare const ANTIGRAVITY_HUB_PLATFORM = "os_type=darwin; arch=arm64";
+/** Client-Metadata only goes on control-plane calls (project discovery, OAuth, onboarding). */
+export declare const ANTIGRAVITY_CLIENT_METADATA: string;
 export declare function getAntigravityVersion(): string;
 /**
  * Set the runtime Antigravity version. Can only be called once (at startup).
@@ -48,21 +67,32 @@ export declare function getAntigravityVersion(): string;
  */
 export declare function setAntigravityVersion(version: string): void;
 /** @deprecated Use getAntigravityVersion() for runtime access. */
-export declare const ANTIGRAVITY_VERSION = "1.18.3";
-export declare function getAntigravityHeaders(): HeaderSet & {
-    "Client-Metadata": string;
-};
+export declare const ANTIGRAVITY_VERSION = "2.24.0";
+/**
+ * Antigravity Hub User-Agent, e.g.
+ * `antigravity/hub/2.24.0 (aidev_client; os_type=darwin; arch=arm64; cl=1000335682)`.
+ * Cloud Code reads the client version from this header, so it is resolved at call
+ * time from the runtime version rather than from a stored fingerprint.
+ */
+export declare function getAntigravityUserAgent(version?: string): string;
+/**
+ * Headers for Antigravity content, project and quota requests. The Hub sends only
+ * its User-Agent: no X-Goog-Api-Client and no Client-Metadata.
+ */
+export declare function getAntigravityHeaders(): HeaderSet;
 /** @deprecated Use getAntigravityHeaders() for runtime access. */
 export declare const ANTIGRAVITY_HEADERS: {
-    readonly "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/1.18.3 Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36";
-    readonly "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1";
-    readonly "Client-Metadata": "{\"ideType\":\"ANTIGRAVITY\",\"platform\":\"WINDOWS\",\"pluginType\":\"GEMINI\"}" | "{\"ideType\":\"ANTIGRAVITY\",\"platform\":\"MACOS\",\"pluginType\":\"GEMINI\"}";
+    readonly "User-Agent": string;
 };
 export type HeaderSet = {
     "User-Agent": string;
     "X-Goog-Api-Client"?: string;
     "Client-Metadata"?: string;
 };
+/**
+ * UA/headers for Antigravity requests. Kept as a named helper for call sites that
+ * used to randomize a device fingerprint: the Hub identity now carries the build.
+ */
 export declare function getRandomizedHeaders(style?: HeaderStyle, model?: string): HeaderSet;
 export type HeaderStyle = "antigravity";
 /**

@@ -54,7 +54,30 @@ export const ANTIGRAVITY_ENDPOINT = ANTIGRAVITY_ENDPOINT_DAILY;
  * Hardcoded project id used when Antigravity does not return one (e.g., business/workspace accounts).
  */
 export const ANTIGRAVITY_DEFAULT_PROJECT_ID = "rising-fact-p41fc";
-export const ANTIGRAVITY_VERSION_FALLBACK = "1.18.3";
+/**
+ * Cloud Code only serves newer models (Gemini 4 Argon included) to Antigravity Hub
+ * clients at or above this version. Older clients are answered with
+ * "This version of Antigravity is no longer supported" instead of a model response.
+ */
+export const ANTIGRAVITY_MINIMUM_VERSION = "2.23.0";
+/**
+ * Hub release reported when the update manifest is unreachable. Keep it at or above
+ * ANTIGRAVITY_MINIMUM_VERSION and update it together with ANTIGRAVITY_HUB_CHANGELISTS.
+ */
+export const ANTIGRAVITY_VERSION_FALLBACK = "2.24.0";
+/**
+ * Build changelists of specific Hub releases. Releases without a known CL omit the
+ * cl= field instead of claiming another build's CL.
+ */
+export const ANTIGRAVITY_HUB_CHANGELISTS = {
+    "2.23.0": "998057262",
+    "2.23.1": "998881661",
+    "2.24.0": "1000335682",
+};
+/** Platform the Hub's update manifest is published for, and the UA reports. */
+export const ANTIGRAVITY_HUB_PLATFORM = "os_type=darwin; arch=arm64";
+/** Client-Metadata only goes on control-plane calls (project discovery, OAuth, onboarding). */
+export const ANTIGRAVITY_CLIENT_METADATA = `{"ideType":"ANTIGRAVITY","platform":"${process.platform === "win32" ? "WINDOWS" : "MACOS"}","pluginType":"GEMINI"}`;
 let antigravityVersion = ANTIGRAVITY_VERSION_FALLBACK;
 let versionLocked = false;
 export function getAntigravityVersion() { return antigravityVersion; }
@@ -70,35 +93,37 @@ export function setAntigravityVersion(version) {
 }
 /** @deprecated Use getAntigravityVersion() for runtime access. */
 export const ANTIGRAVITY_VERSION = ANTIGRAVITY_VERSION_FALLBACK;
+/**
+ * Antigravity Hub User-Agent, e.g.
+ * `antigravity/hub/2.24.0 (aidev_client; os_type=darwin; arch=arm64; cl=1000335682)`.
+ * Cloud Code reads the client version from this header, so it is resolved at call
+ * time from the runtime version rather than from a stored fingerprint.
+ */
+export function getAntigravityUserAgent(version = getAntigravityVersion()) {
+    const changelist = ANTIGRAVITY_HUB_CHANGELISTS[version];
+    const clPart = changelist ? `; cl=${changelist}` : "";
+    return `antigravity/hub/${version} (aidev_client; ${ANTIGRAVITY_HUB_PLATFORM}${clPart})`;
+}
+/**
+ * Headers for Antigravity content, project and quota requests. The Hub sends only
+ * its User-Agent: no X-Goog-Api-Client and no Client-Metadata.
+ */
 export function getAntigravityHeaders() {
     return {
-        "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/${getAntigravityVersion()} Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36`,
-        "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-        "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"${process.platform === "win32" ? "WINDOWS" : "MACOS"}","pluginType":"GEMINI"}`,
+        "User-Agent": getAntigravityUserAgent(),
     };
 }
 /** @deprecated Use getAntigravityHeaders() for runtime access. */
 export const ANTIGRAVITY_HEADERS = {
-    "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/${ANTIGRAVITY_VERSION} Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36`,
-    "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-    "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"${process.platform === "win32" ? "WINDOWS" : "MACOS"}","pluginType":"GEMINI"}`,
+    "User-Agent": getAntigravityUserAgent(ANTIGRAVITY_VERSION_FALLBACK),
 };
-const ANTIGRAVITY_PLATFORMS = ["windows/amd64", "darwin/arm64", "darwin/amd64"];
-const ANTIGRAVITY_API_CLIENTS = [
-    "google-cloud-sdk vscode_cloudshelleditor/0.1",
-    "google-cloud-sdk vscode/1.96.0",
-    "google-cloud-sdk vscode/1.95.0",
-];
-function randomFrom(arr) {
-    return arr[Math.floor(Math.random() * arr.length)];
-}
+/**
+ * UA/headers for Antigravity requests. Kept as a named helper for call sites that
+ * used to randomize a device fingerprint: the Hub identity now carries the build.
+ */
 export function getRandomizedHeaders(style = "antigravity", model) {
-    const platform = randomFrom(ANTIGRAVITY_PLATFORMS);
-    const metadataPlatform = platform.startsWith("windows") ? "WINDOWS" : "MACOS";
     return {
-        "User-Agent": `antigravity/${getAntigravityVersion()} ${platform}`,
-        "X-Goog-Api-Client": randomFrom(ANTIGRAVITY_API_CLIENTS),
-        "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"${metadataPlatform}","pluginType":"GEMINI"}`,
+        "User-Agent": getAntigravityUserAgent(),
     };
 }
 /**

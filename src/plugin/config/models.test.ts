@@ -18,12 +18,21 @@ describe("OPENCODE_MODEL_DEFINITIONS", () => {
       "antigravity-claude-opus-5-5-thinking",
       "antigravity-claude-sonnet-5-5-thinking",
       "antigravity-gemini-3.8-flash",
+      "antigravity-gemini-4-argon",
       "antigravity-gpt-oss-120b-medium",
     ]);
   });
 
   it("exports OPENCODE_WHITELIST_MODELS matching definition keys", () => {
     expect(OPENCODE_WHITELIST_MODELS.sort()).toEqual(Object.keys(OPENCODE_MODEL_DEFINITIONS).sort());
+  });
+
+  it("defines Gemini 4 Argon variants", () => {
+    expect(getModel("antigravity-gemini-4-argon").variants).toEqual({
+      low: { thinkingLevel: "low" },
+      medium: { thinkingLevel: "medium" },
+      high: { thinkingLevel: "high" },
+    });
   });
 
   it("defines Gemini 3.8 Flash variants", () => {

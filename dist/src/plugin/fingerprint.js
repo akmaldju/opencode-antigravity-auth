@@ -9,7 +9,7 @@
  */
 import * as crypto from "node:crypto";
 import * as os from "node:os";
-import { getAntigravityVersion } from "../constants";
+import { getAntigravityUserAgent, getAntigravityVersion } from "../constants";
 const OS_VERSIONS = {
     darwin: ["10.15.7", "11.6.8", "12.6.3", "13.5.2", "14.2.1", "14.5"],
     win32: ["10.0.19041", "10.0.19042", "10.0.19043", "10.0.22000", "10.0.22621", "10.0.22631"],
@@ -50,12 +50,11 @@ function generateSessionToken() {
  */
 export function generateFingerprint() {
     const platform = randomFrom(PLATFORM_CHOICES);
-    const arch = randomFrom(ARCHITECTURES);
     const osVersion = randomFrom(OS_VERSIONS[platform] ?? OS_VERSIONS.darwin);
     return {
         deviceId: generateDeviceId(),
         sessionToken: generateSessionToken(),
-        userAgent: `antigravity/${getAntigravityVersion()} ${platform}/${arch}`,
+        userAgent: getAntigravityUserAgent(),
         apiClient: randomFrom(SDK_CLIENTS),
         clientMetadata: {
             ideType: randomFrom(IDE_TYPES),
@@ -71,11 +70,10 @@ export function generateFingerprint() {
  */
 export function collectCurrentFingerprint() {
     const platform = os.platform();
-    const arch = os.arch();
     return {
         deviceId: generateDeviceId(),
         sessionToken: generateSessionToken(),
-        userAgent: `antigravity/${getAntigravityVersion()} ${platform}/${arch}`,
+        userAgent: getAntigravityUserAgent(),
         apiClient: "google-cloud-sdk vscode_cloudshelleditor/0.1",
         clientMetadata: {
             ideType: "ANTIGRAVITY",

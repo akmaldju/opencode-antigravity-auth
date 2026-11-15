@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { ANTIGRAVITY_ENDPOINT, EMPTY_SCHEMA_PLACEHOLDER_NAME, EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION, SKIP_THOUGHT_SIGNATURE, getRandomizedHeaders, } from "../constants";
+import { ANTIGRAVITY_ENDPOINT, EMPTY_SCHEMA_PLACEHOLDER_NAME, EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION, SKIP_THOUGHT_SIGNATURE, getAntigravityUserAgent, } from "../constants";
 import { cacheSignature, getCachedSignature } from "./cache";
 import { getKeepThinking } from "./config";
 import { createStreamingTransformer, transformSseLine, transformStreamingPayload, sanitizeGuardrailMessage, } from "./core/streaming";
@@ -11,9 +11,8 @@ import { CLAUDE_TOOL_SYSTEM_INSTRUCTION, CLAUDE_DESCRIPTION_PROMPT, ANTIGRAVITY_
 import { analyzeConversationState, closeToolLoopForThinking, needsThinkingRecovery, } from "./thinking-recovery";
 import { sanitizeCrossModelPayloadInPlace } from "./transform/cross-model-sanitizer";
 import { isGemini3Model, isImageGenerationModel, buildImageGenerationConfig, applyGeminiTransforms } from "./transform";
-import { resolveModelWithTier, resolveModelWithVariant, resolveModelForHeaderStyle, resolveAntigravityGemini35FlashBackendModel, resolveAntigravityGemini36FlashBackendModel, resolveAntigravityGemini37FlashBackendModel, resolveAntigravityGemini38FlashBackendModel, resolveAntigravityClaude55BackendModel, isClaudeModel, isClaudeThinkingModel, CLAUDE_THINKING_MAX_OUTPUT_TOKENS, } from "./transform";
+import { resolveModelWithTier, resolveModelWithVariant, resolveModelForHeaderStyle, resolveAntigravityGemini35FlashBackendModel, resolveAntigravityGemini36FlashBackendModel, resolveAntigravityGemini37FlashBackendModel, resolveAntigravityGemini38FlashBackendModel, resolveAntigravityGemini4ArgonBackendModel, resolveAntigravityClaude55BackendModel, isClaudeModel, isClaudeThinkingModel, CLAUDE_THINKING_MAX_OUTPUT_TOKENS, } from "./transform";
 import { detectErrorType } from "./recovery";
-import { getSessionFingerprint, buildFingerprintHeaders } from "./fingerprint";
 const log = createLogger("request");
 const PLUGIN_SESSION_ID = `-${crypto.randomUUID()}`;
 const sessionDisplayedThinkingHashes = new Set();
@@ -32,9 +31,9 @@ function shouldCacheThinkingSignatures(model) {
     if (typeof model !== "string")
         return false;
     const lower = model.toLowerCase();
-    // Both Claude and Gemini 3 models require thought signature caching
+    // Claude and Gemini 3/4 models require thought signature caching
     // for multi-turn conversations with function calling
-    return lower.includes("claude") || lower.includes("gemini-3");
+    return lower.includes("claude") || lower.includes("gemini-3") || lower.includes("gemini-4");
 }
 function hashConversationSeed(seed) {
     return crypto.createHash("sha256").update(seed, "utf8").digest("hex").slice(0, 16);
@@ -642,7 +641,8 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
             const variantProviderOptions = (parsedBody.providerOptions ?? requestRootForVariant?.providerOptions);
             const variantGenerationConfig = (requestRootForVariant?.generationConfig ?? parsedBody.generationConfig);
             const earlyVariantConfig = extractVariantThinkingConfig(variantProviderOptions, variantGenerationConfig);
-            const isGemini3Model = effectiveModel.toLowerCase().includes("gemini-3");
+            const isGemini3Model = effectiveModel.toLowerCase().includes("gemini-3")
+                || effectiveModel.toLowerCase().includes("gemini-4");
             if (earlyVariantConfig?.thinkingLevel && isGemini3Model) {
                 tierThinkingLevel = earlyVariantConfig.thinkingLevel;
                 tierThinkingBudget = undefined;
@@ -665,34 +665,17 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
                     model: effectiveModel,
                 };
                 if (headerStyle === "antigravity") {
-                    const gemini38FlashBackendModel = resolveAntigravityGemini38FlashBackendModel(rawModel, tierThinkingLevel);
-                    if (gemini38FlashBackendModel) {
-                        effectiveModel = gemini38FlashBackendModel;
-                        wrappedBody.model = gemini38FlashBackendModel;
-                    }
-                    else {
-                        const gemini37FlashBackendModel = resolveAntigravityGemini37FlashBackendModel(rawModel, tierThinkingLevel);
-                        if (gemini37FlashBackendModel) {
-                            effectiveModel = gemini37FlashBackendModel;
-                            wrappedBody.model = gemini37FlashBackendModel;
-                        }
-                        else {
-                            const gemini36FlashBackendModel = resolveAntigravityGemini36FlashBackendModel(rawModel, tierThinkingLevel);
-                            if (gemini36FlashBackendModel) {
-                                effectiveModel = gemini36FlashBackendModel;
-                                wrappedBody.model = gemini36FlashBackendModel;
-                            }
-                            else {
-                                const claude55Tier = tierThinkingLevel ?? (typeof tierThinkingBudget === "number"
-                                    ? (tierThinkingBudget <= 8192 ? "low" : tierThinkingBudget <= 16384 ? "medium" : "high")
-                                    : "high");
-                                const claude55BackendModel = resolveAntigravityClaude55BackendModel(rawModel, claude55Tier);
-                                if (claude55BackendModel) {
-                                    effectiveModel = claude55BackendModel;
-                                    wrappedBody.model = claude55BackendModel;
-                                }
-                            }
-                        }
+                    const claude55Tier = tierThinkingLevel ?? (typeof tierThinkingBudget === "number"
+                        ? (tierThinkingBudget <= 8192 ? "low" : tierThinkingBudget <= 16384 ? "medium" : "high")
+                        : "high");
+                    const backendModel = resolveAntigravityGemini4ArgonBackendModel(rawModel, tierThinkingLevel) ??
+                        resolveAntigravityGemini38FlashBackendModel(rawModel, tierThinkingLevel) ??
+                        resolveAntigravityGemini37FlashBackendModel(rawModel, tierThinkingLevel) ??
+                        resolveAntigravityGemini36FlashBackendModel(rawModel, tierThinkingLevel) ??
+                        resolveAntigravityClaude55BackendModel(rawModel, claude55Tier);
+                    if (backendModel) {
+                        effectiveModel = backendModel;
+                        wrappedBody.model = backendModel;
                     }
                 }
                 // Some callers may already send an Antigravity-wrapped body.
@@ -760,30 +743,16 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
                 // Variant/effort was already applied above (before backend-model resolution, see #37).
                 log.debug(`[ThinkingResolution] rawModel=${rawModel} resolvedModel=${effectiveModel} resolvedTier=${tierThinkingLevel ?? "none"} variantLevel=${earlyVariantConfig?.thinkingLevel ?? "none"} variantBudget=${earlyVariantConfig?.thinkingBudget ?? "none"} providerOptions.google=${JSON.stringify(requestPayload.providerOptions?.google ?? null)} generationConfig.thinkingConfig=${JSON.stringify(rawGenerationConfig?.thinkingConfig ?? null)}`);
                 if (headerStyle === "antigravity") {
-                    const gemini38FlashBackendModel = resolveAntigravityGemini38FlashBackendModel(rawModel, tierThinkingLevel);
-                    if (gemini38FlashBackendModel) {
-                        effectiveModel = gemini38FlashBackendModel;
-                    }
-                    else {
-                        const gemini37FlashBackendModel = resolveAntigravityGemini37FlashBackendModel(rawModel, tierThinkingLevel);
-                        if (gemini37FlashBackendModel) {
-                            effectiveModel = gemini37FlashBackendModel;
-                        }
-                        else {
-                            const gemini36FlashBackendModel = resolveAntigravityGemini36FlashBackendModel(rawModel, tierThinkingLevel);
-                            if (gemini36FlashBackendModel) {
-                                effectiveModel = gemini36FlashBackendModel;
-                            }
-                            else {
-                                const claude55Tier = tierThinkingLevel ?? (typeof tierThinkingBudget === "number"
-                                    ? (tierThinkingBudget <= 8192 ? "low" : tierThinkingBudget <= 16384 ? "medium" : "high")
-                                    : "high");
-                                const claude55BackendModel = resolveAntigravityClaude55BackendModel(rawModel, claude55Tier);
-                                if (claude55BackendModel) {
-                                    effectiveModel = claude55BackendModel;
-                                }
-                            }
-                        }
+                    const claude55Tier = tierThinkingLevel ?? (typeof tierThinkingBudget === "number"
+                        ? (tierThinkingBudget <= 8192 ? "low" : tierThinkingBudget <= 16384 ? "medium" : "high")
+                        : "high");
+                    const backendModel = resolveAntigravityGemini4ArgonBackendModel(rawModel, tierThinkingLevel) ??
+                        resolveAntigravityGemini38FlashBackendModel(rawModel, tierThinkingLevel) ??
+                        resolveAntigravityGemini37FlashBackendModel(rawModel, tierThinkingLevel) ??
+                        resolveAntigravityGemini36FlashBackendModel(rawModel, tierThinkingLevel) ??
+                        resolveAntigravityClaude55BackendModel(rawModel, claude55Tier);
+                    if (backendModel) {
+                        effectiveModel = backendModel;
                     }
                 }
                 if (isClaude) {
@@ -1303,20 +1272,14 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
             headers.set("anthropic-beta", interleavedHeader);
         }
     }
-    // Antigravity mode: Match Antigravity Manager & CLI signature
-    const fingerprint = options?.fingerprint ?? getSessionFingerprint();
-    const fingerprintHeaders = buildFingerprintHeaders(fingerprint);
-    const selectedHeaders = getRandomizedHeaders("antigravity", requestedModel);
-    let userAgent = fingerprintHeaders["User-Agent"] || selectedHeaders["User-Agent"];
-    // Gemini 3.7/3.8 Flash are only served to the official Antigravity CLI user agent.
-    // With the generic `antigravity/<ver> <platform>/<arch>` UA the backend
-    // returns 404 NOT_FOUND (rewritten as "enable preview features").
-    // Verified with agy v1.2.7: UA `antigravity/cli/<ver> (aidev_client; ...)`
-    // returns 200 with modelVersion gemini-3.7-flash / gemini-3.8-flash for low/medium/high.
-    if (/gemini-3\.[78]-flash/i.test(effectiveModel)) {
-        userAgent = "antigravity/cli/1.2.7 (aidev_client; os_type=linux; arch=amd64; cl=962369648; auth_method=consumer)";
-    }
-    headers.set("User-Agent", userAgent);
+    // Antigravity mode: the Hub UA carries the client version Cloud Code gates on.
+    // It is resolved from the runtime version on every request, never from a stored
+    // fingerprint: a stale version is answered with "This version of Antigravity is
+    // no longer supported" instead of a model response, and only serves the older
+    // model catalog. No X-Goog-Api-Client and no Client-Metadata on content calls.
+    headers.set("User-Agent", getAntigravityUserAgent());
+    headers.delete("X-Goog-Api-Client");
+    headers.delete("Client-Metadata");
     return {
         request: transformedUrl,
         init: {
