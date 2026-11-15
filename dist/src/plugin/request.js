@@ -11,7 +11,7 @@ import { CLAUDE_TOOL_SYSTEM_INSTRUCTION, CLAUDE_DESCRIPTION_PROMPT, ANTIGRAVITY_
 import { analyzeConversationState, closeToolLoopForThinking, needsThinkingRecovery, } from "./thinking-recovery";
 import { sanitizeCrossModelPayloadInPlace } from "./transform/cross-model-sanitizer";
 import { isGemini3Model, isImageGenerationModel, buildImageGenerationConfig, applyGeminiTransforms } from "./transform";
-import { resolveModelWithTier, resolveModelWithVariant, resolveModelForHeaderStyle, resolveAntigravityGemini35FlashBackendModel, resolveAntigravityGemini36FlashBackendModel, resolveAntigravityGemini37FlashBackendModel, resolveAntigravityGemini38FlashBackendModel, resolveAntigravityGemini4ArgonBackendModel, resolveAntigravityClaude55BackendModel, isClaudeModel, isClaudeThinkingModel, CLAUDE_THINKING_MAX_OUTPUT_TOKENS, } from "./transform";
+import { resolveModelWithTier, resolveModelWithVariant, resolveModelForHeaderStyle, resolveAntigravityGemini35FlashBackendModel, resolveAntigravityGemini36FlashBackendModel, resolveAntigravityGemini37FlashBackendModel, resolveAntigravityGemini38FlashBackendModel, resolveAntigravityGemini4ArgonBackendModel, resolveAntigravityGemini4HydrogenBackendModel, resolveAntigravityClaude55BackendModel, isClaudeModel, isClaudeThinkingModel, CLAUDE_THINKING_MAX_OUTPUT_TOKENS, } from "./transform";
 import { detectErrorType } from "./recovery";
 const log = createLogger("request");
 const PLUGIN_SESSION_ID = `-${crypto.randomUUID()}`;
@@ -668,7 +668,8 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
                     const claude55Tier = tierThinkingLevel ?? (typeof tierThinkingBudget === "number"
                         ? (tierThinkingBudget <= 8192 ? "low" : tierThinkingBudget <= 16384 ? "medium" : "high")
                         : "high");
-                    const backendModel = resolveAntigravityGemini4ArgonBackendModel(rawModel, tierThinkingLevel) ??
+                    const backendModel = resolveAntigravityGemini4HydrogenBackendModel(rawModel, tierThinkingLevel) ??
+                        resolveAntigravityGemini4ArgonBackendModel(rawModel, tierThinkingLevel) ??
                         resolveAntigravityGemini38FlashBackendModel(rawModel, tierThinkingLevel) ??
                         resolveAntigravityGemini37FlashBackendModel(rawModel, tierThinkingLevel) ??
                         resolveAntigravityGemini36FlashBackendModel(rawModel, tierThinkingLevel) ??
@@ -746,7 +747,8 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
                     const claude55Tier = tierThinkingLevel ?? (typeof tierThinkingBudget === "number"
                         ? (tierThinkingBudget <= 8192 ? "low" : tierThinkingBudget <= 16384 ? "medium" : "high")
                         : "high");
-                    const backendModel = resolveAntigravityGemini4ArgonBackendModel(rawModel, tierThinkingLevel) ??
+                    const backendModel = resolveAntigravityGemini4HydrogenBackendModel(rawModel, tierThinkingLevel) ??
+                        resolveAntigravityGemini4ArgonBackendModel(rawModel, tierThinkingLevel) ??
                         resolveAntigravityGemini38FlashBackendModel(rawModel, tierThinkingLevel) ??
                         resolveAntigravityGemini37FlashBackendModel(rawModel, tierThinkingLevel) ??
                         resolveAntigravityGemini36FlashBackendModel(rawModel, tierThinkingLevel) ??

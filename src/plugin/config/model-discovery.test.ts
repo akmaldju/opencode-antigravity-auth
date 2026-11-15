@@ -70,14 +70,16 @@ describe("model discovery is forward-only", () => {
   });
 
   it("surfaces Gemini 4 families the curated catalog does not cover", () => {
-    expect(isDiscoverableModelId("gemini-4-hydrogen-high")).toBe(true);
     expect(isDiscoverableModelId("gemini-4-flash")).toBe(true);
-    expect(buildDiscoveredModels(["gemini-4-hydrogen-high"])["antigravity-gemini-4-hydrogen-high"]).toBeDefined();
+    expect(isDiscoverableModelId("gemini-5-flash")).toBe(true);
+    expect(buildDiscoveredModels(["gemini-4-flash"])["antigravity-gemini-4-flash"]).toBeDefined();
   });
 
-  it("leaves the curated Gemini 4 Argon entry to the curated catalog", () => {
+  it("leaves the curated Gemini 4 entries to the curated catalog", () => {
     expect(isDiscoverableModelId("gemini-4-argon")).toBe(false);
     expect(isDiscoverableModelId("gemini-4-argon-high")).toBe(false);
+    expect(isDiscoverableModelId("gemini-4-hydrogen")).toBe(false);
+    expect(isDiscoverableModelId("gemini-4-hydrogen-xhigh")).toBe(false);
   });
 
   it("surfaces Gemini Flash generations newer than the curated floor", () => {
@@ -92,8 +94,8 @@ describe("model discovery is forward-only", () => {
   });
 
   it("keeps the denylist ahead of the version floor", () => {
-    expect(isDiscoverableModelId("gemini-4-hydrogen-image")).toBe(false);
-    expect(isDiscoverableModelId("gemini-4-hydrogen-tiered")).toBe(false);
+    expect(isDiscoverableModelId("gemini-4-flash-image")).toBe(false);
+    expect(isDiscoverableModelId("gemini-4-flash-tiered")).toBe(false);
   });
 
   it("rejects unknown families and malformed ids", () => {
@@ -105,7 +107,7 @@ describe("model discovery is forward-only", () => {
 
 describe("model discovery definitions", () => {
   it("gives Gemini ids Gemini limits and thinking variants", () => {
-    const def = buildDiscoveredModelDefinition("gemini-4-hydrogen-high");
+    const def = buildDiscoveredModelDefinition("gemini-4-flash-high");
     expect(def.limit).toEqual({ context: 1048576, output: 65536 });
     expect(def.variants?.low).toEqual({ thinkingLevel: "low" });
     expect(def.variants?.high).toEqual({ thinkingLevel: "high" });
@@ -144,10 +146,10 @@ describe("collectDiscoveredModels", () => {
 
   it("adds a newer model when the account has one", async () => {
     vi.mocked(fetchAvailableModels).mockResolvedValue({
-      models: { "gemini-3-flash": {}, "gemini-4-hydrogen-high": {}, "chat_1": {} },
+      models: { "gemini-3-flash": {}, "gemini-4-flash-high": {}, "chat_1": {} },
     } as never);
     const discovered = await collectDiscoveredModels("token", "project");
-    expect(Object.keys(discovered)).toEqual(["antigravity-gemini-4-hydrogen-high"]);
+    expect(Object.keys(discovered)).toEqual(["antigravity-gemini-4-flash-high"]);
   });
 
   it("degrades to an empty result instead of throwing", async () => {

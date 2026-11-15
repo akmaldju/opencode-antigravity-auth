@@ -77,6 +77,11 @@ export declare function resolveAntigravityGemini38FlashBackendModel(model: strin
  */
 export declare function resolveAntigravityGemini4ArgonBackendModel(model: string, thinkingLevel?: string): string | undefined;
 /**
+ * Resolves Gemini 4 Hydrogen to backend model ID with tier suffix.
+ * Backend expects gemini-4-hydrogen-{low|medium|high|xhigh}; there is no bare id.
+ */
+export declare function resolveAntigravityGemini4HydrogenBackendModel(model: string, thinkingLevel?: string): string | undefined;
+/**
  * Resolves Claude 5.5 models to backend model ID with tier suffix.
  * Backend expects claude-{opus|sonnet}-5-5-{low|medium|high}.
  */

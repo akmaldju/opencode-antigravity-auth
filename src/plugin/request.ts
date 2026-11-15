@@ -68,6 +68,7 @@ import {
   resolveAntigravityGemini37FlashBackendModel,
   resolveAntigravityGemini38FlashBackendModel,
   resolveAntigravityGemini4ArgonBackendModel,
+  resolveAntigravityGemini4HydrogenBackendModel,
   resolveAntigravityClaude55BackendModel,
   isClaudeModel,
   isClaudeThinkingModel,
@@ -925,6 +926,7 @@ export function prepareAntigravityRequest(
             ? (tierThinkingBudget <= 8192 ? "low" : tierThinkingBudget <= 16384 ? "medium" : "high")
             : "high");
           const backendModel =
+            resolveAntigravityGemini4HydrogenBackendModel(rawModel, tierThinkingLevel) ??
             resolveAntigravityGemini4ArgonBackendModel(rawModel, tierThinkingLevel) ??
             resolveAntigravityGemini38FlashBackendModel(rawModel, tierThinkingLevel) ??
             resolveAntigravityGemini37FlashBackendModel(rawModel, tierThinkingLevel) ??
@@ -1020,6 +1022,7 @@ export function prepareAntigravityRequest(
             ? (tierThinkingBudget <= 8192 ? "low" : tierThinkingBudget <= 16384 ? "medium" : "high")
             : "high");
           const backendModel =
+            resolveAntigravityGemini4HydrogenBackendModel(rawModel, tierThinkingLevel) ??
             resolveAntigravityGemini4ArgonBackendModel(rawModel, tierThinkingLevel) ??
             resolveAntigravityGemini38FlashBackendModel(rawModel, tierThinkingLevel) ??
             resolveAntigravityGemini37FlashBackendModel(rawModel, tierThinkingLevel) ??

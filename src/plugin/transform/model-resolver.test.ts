@@ -8,6 +8,7 @@ import {
   resolveAntigravityGemini37FlashBackendModel,
   resolveAntigravityGemini38FlashBackendModel,
   resolveAntigravityGemini4ArgonBackendModel,
+  resolveAntigravityGemini4HydrogenBackendModel,
 } from "./model-resolver";
 
 describe("resolveModelWithTier", () => {
@@ -347,6 +348,33 @@ describe("resolveAntigravityGemini4ArgonBackendModel", () => {
   it("returns undefined for non-matching models", () => {
     expect(resolveAntigravityGemini4ArgonBackendModel("gemini-4-hydrogen-high")).toBeUndefined();
     expect(resolveAntigravityGemini4ArgonBackendModel("gemini-3.8-flash-high")).toBeUndefined();
+  });
+});
+
+describe("resolveAntigravityGemini4HydrogenBackendModel", () => {
+  it("resolves a bare gemini-4-hydrogen to the default high tier", () => {
+    expect(resolveAntigravityGemini4HydrogenBackendModel("gemini-4-hydrogen")).toBe("gemini-4-hydrogen-high");
+  });
+
+  it("keeps the xhigh tier the backend advertises", () => {
+    expect(resolveAntigravityGemini4HydrogenBackendModel("gemini-4-hydrogen-xhigh")).toBe("gemini-4-hydrogen-xhigh");
+  });
+
+  it("resolves the curated model id with a tier", () => {
+    expect(resolveAntigravityGemini4HydrogenBackendModel("antigravity-gemini-4-hydrogen-medium")).toBe(
+      "gemini-4-hydrogen-medium",
+    );
+  });
+
+  it("lets the thinkingLevel parameter override the tier", () => {
+    expect(resolveAntigravityGemini4HydrogenBackendModel("gemini-4-hydrogen-low", "high")).toBe(
+      "gemini-4-hydrogen-high",
+    );
+  });
+
+  it("returns undefined for non-matching models", () => {
+    expect(resolveAntigravityGemini4HydrogenBackendModel("gemini-4-argon-high")).toBeUndefined();
+    expect(resolveAntigravityGemini4HydrogenBackendModel("gemini-3.8-flash-high")).toBeUndefined();
   });
 });
 

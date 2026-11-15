@@ -3,6 +3,18 @@ const DEFAULT_MODALITIES = {
     output: ["text"],
 };
 export const OPENCODE_MODEL_DEFINITIONS = {
+    "antigravity-gemini-4-hydrogen": {
+        name: "Gemini 4 Hydrogen (Antigravity)",
+        limit: { context: 1048576, output: 65536 },
+        modalities: DEFAULT_MODALITIES,
+        // The backend also serves gemini-4-hydrogen-xhigh; request it by its full
+        // model id (antigravity-gemini-4-hydrogen-xhigh) as there is no variant slot.
+        variants: {
+            low: { thinkingLevel: "low" },
+            medium: { thinkingLevel: "medium" },
+            high: { thinkingLevel: "high" },
+        },
+    },
     "antigravity-gemini-4-argon": {
         name: "Gemini 4 Argon (Antigravity)",
         limit: { context: 1048576, output: 65536 },

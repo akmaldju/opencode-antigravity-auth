@@ -57,7 +57,8 @@ const GEMINI_35_FLASH_REGEX = /^gemini-3\.5-flash(?:-(low|high))?$/i;
 const GEMINI_36_FLASH_REGEX = /^gemini-3\.6-flash(?:-(low|medium|high))?$/i;
 const GEMINI_37_FLASH_REGEX = /^gemini-3\.7-flash(?:-(low|medium|high))?$/i;
 const GEMINI_38_FLASH_REGEX = /^gemini-3\.8-flash(?:-(low|medium|high))?$/i;
-const GEMINI_4_ARGON_REGEX = /^gemini-4-argon(?:-(minimal|low|medium|high|xhigh))?$/i;
+const GEMINI_4_ARGON_REGEX = /^gemini-4-argon(?:-(low|medium|high))?$/i;
+const GEMINI_4_HYDROGEN_REGEX = /^gemini-4-hydrogen(?:-(low|medium|high|xhigh))?$/i;
 /** Gemini 4 (Argon/Hydrogen) is served with thinkingLevel like Gemini 3. */
 const GEMINI_4_REGEX = /^gemini-4(?:[.-]|$)/i;
 // ANTIGRAVITY_ONLY_MODELS removed - all models now default to antigravity
@@ -191,6 +192,19 @@ export function resolveAntigravityGemini4ArgonBackendModel(model, thinkingLevel)
     const level = (thinkingLevel ?? match[1] ?? "high").toLowerCase();
     const validLevel = ["low", "medium", "high"].includes(level) ? level : "high";
     return `gemini-4-argon-${validLevel}`;
+}
+/**
+ * Resolves Gemini 4 Hydrogen to backend model ID with tier suffix.
+ * Backend expects gemini-4-hydrogen-{low|medium|high|xhigh}; there is no bare id.
+ */
+export function resolveAntigravityGemini4HydrogenBackendModel(model, thinkingLevel) {
+    const modelWithoutQuota = model.replace(QUOTA_PREFIX_REGEX, "");
+    const match = modelWithoutQuota.match(GEMINI_4_HYDROGEN_REGEX);
+    if (!match)
+        return undefined;
+    const level = (thinkingLevel ?? match[1] ?? "high").toLowerCase();
+    const validLevel = ["low", "medium", "high", "xhigh"].includes(level) ? level : "high";
+    return `gemini-4-hydrogen-${validLevel}`;
 }
 /**
  * Resolves Claude 5.5 models to backend model ID with tier suffix.

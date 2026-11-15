@@ -27,6 +27,7 @@ export {
   resolveAntigravityGemini37FlashBackendModel,
   resolveAntigravityGemini38FlashBackendModel,
   resolveAntigravityGemini4ArgonBackendModel,
+  resolveAntigravityGemini4HydrogenBackendModel,
   resolveAntigravityClaude55BackendModel,
   getModelFamily,
   MODEL_ALIASES,
