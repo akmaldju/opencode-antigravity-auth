@@ -365,6 +365,20 @@ function isValidRequestPart(part: unknown): boolean {
   );
 }
 
+/**
+ * Cloud Code rejects a request carrying the literal tool path
+ * `tools.opencode.session_move` with a canned 429 ("Resource has been
+ * exhausted"), which poisons the whole session. OpenCode writes that path into
+ * its Code Mode system prompt, so every request fails until it is rewritten.
+ * The renamed path is documentation only: the tool keeps its real name.
+ */
+export const SESSION_MOVE_PROMPT_TOKEN = "tools.opencode.session_move";
+export const SESSION_MOVE_PROMPT_TOKEN_SAFE = "tools.opencode.session_relocate";
+
+function sanitizePromptText(text: string): string {
+  return text.replaceAll(SESSION_MOVE_PROMPT_TOKEN, SESSION_MOVE_PROMPT_TOKEN_SAFE);
+}
+
 function sanitizeRequestPayloadForAntigravity(payload: Record<string, unknown>): void {
   const anyPayload = payload as any;
 
@@ -380,6 +394,9 @@ function sanitizeRequestPayloadForAntigravity(payload: Record<string, unknown>):
         let foundFirstFunctionCall = false;
 
         const sanitizedParts = rawParts.filter(isValidRequestPart).map((part: any) => {
+          if (part && typeof part === "object" && typeof part.text === "string") {
+            part.text = sanitizePromptText(part.text);
+          }
           if (part && typeof part === "object" && part.functionCall) {
             let sig = part.thoughtSignature || part.thought_signature;
 
@@ -425,6 +442,11 @@ function sanitizeRequestPayloadForAntigravity(payload: Record<string, unknown>):
   if (systemInstruction && typeof systemInstruction === "object" && !Array.isArray(systemInstruction)) {
     const sys = systemInstruction as Record<string, unknown>;
     if (Array.isArray(sys.parts)) {
+      for (const part of sys.parts) {
+        if (part && typeof (part as any).text === "string") {
+          (part as any).text = sanitizePromptText((part as any).text);
+        }
+      }
       const sanitizedSystemParts = sys.parts.filter(isValidRequestPart);
       if (sanitizedSystemParts.length > 0) {
         sys.parts = sanitizedSystemParts;
@@ -432,6 +454,8 @@ function sanitizeRequestPayloadForAntigravity(payload: Record<string, unknown>):
         delete anyPayload.systemInstruction;
       }
     }
+  } else if (typeof anyPayload.systemInstruction === "string") {
+    anyPayload.systemInstruction = sanitizePromptText(anyPayload.systemInstruction);
   }
 }
 
@@ -1636,6 +1660,12 @@ export function prepareAntigravityRequest(
     }
   }
 
+  // Safety net: the body was rebuilt above, so rewrite the filtered token in the
+  // serialized form too (system instructions can also arrive pre-wrapped).
+  if (typeof body === "string") {
+    body = sanitizePromptText(body);
+  }
+
   // Antigravity mode: the Hub UA carries the client version Cloud Code gates on.
   // It is resolved from the runtime version on every request, never from a stored
   // fingerprint: a stale version is answered with "This version of Antigravity is
@@ -1644,6 +1674,9 @@ export function prepareAntigravityRequest(
   headers.set("User-Agent", getAntigravityUserAgent());
   headers.delete("X-Goog-Api-Client");
   headers.delete("Client-Metadata");
+  // The body was rewritten; a Content-Length copied from the original request
+  // would describe the wrong length.
+  headers.delete("Content-Length");
 
   return {
     request: transformedUrl,

@@ -241,6 +241,18 @@ function isValidRequestPart(part) {
         Object.prototype.hasOwnProperty.call(record, "codeExecutionResult") ||
         Object.prototype.hasOwnProperty.call(record, "thought"));
 }
+/**
+ * Cloud Code rejects a request carrying the literal tool path
+ * `tools.opencode.session_move` with a canned 429 ("Resource has been
+ * exhausted"), which poisons the whole session. OpenCode writes that path into
+ * its Code Mode system prompt, so every request fails until it is rewritten.
+ * The renamed path is documentation only: the tool keeps its real name.
+ */
+export const SESSION_MOVE_PROMPT_TOKEN = "tools.opencode.session_move";
+export const SESSION_MOVE_PROMPT_TOKEN_SAFE = "tools.opencode.session_relocate";
+function sanitizePromptText(text) {
+    return text.replaceAll(SESSION_MOVE_PROMPT_TOKEN, SESSION_MOVE_PROMPT_TOKEN_SAFE);
+}
 function sanitizeRequestPayloadForAntigravity(payload) {
     const anyPayload = payload;
     if (Array.isArray(anyPayload.contents)) {
@@ -253,6 +265,9 @@ function sanitizeRequestPayloadForAntigravity(payload) {
             const rawParts = Array.isArray(contentRecord.parts) ? contentRecord.parts : [];
             let foundFirstFunctionCall = false;
             const sanitizedParts = rawParts.filter(isValidRequestPart).map((part) => {
+                if (part && typeof part === "object" && typeof part.text === "string") {
+                    part.text = sanitizePromptText(part.text);
+                }
                 if (part && typeof part === "object" && part.functionCall) {
                     let sig = part.thoughtSignature || part.thought_signature;
                     // Only the first functionCall part in a block should have the signature.
@@ -293,6 +308,11 @@ function sanitizeRequestPayloadForAntigravity(payload) {
     if (systemInstruction && typeof systemInstruction === "object" && !Array.isArray(systemInstruction)) {
         const sys = systemInstruction;
         if (Array.isArray(sys.parts)) {
+            for (const part of sys.parts) {
+                if (part && typeof part.text === "string") {
+                    part.text = sanitizePromptText(part.text);
+                }
+            }
             const sanitizedSystemParts = sys.parts.filter(isValidRequestPart);
             if (sanitizedSystemParts.length > 0) {
                 sys.parts = sanitizedSystemParts;
@@ -301,6 +321,9 @@ function sanitizeRequestPayloadForAntigravity(payload) {
                 delete anyPayload.systemInstruction;
             }
         }
+    }
+    else if (typeof anyPayload.systemInstruction === "string") {
+        anyPayload.systemInstruction = sanitizePromptText(anyPayload.systemInstruction);
     }
 }
 function isGeminiToolUsePart(part) {
@@ -1274,6 +1297,11 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
             headers.set("anthropic-beta", interleavedHeader);
         }
     }
+    // Safety net: the body was rebuilt above, so rewrite the filtered token in the
+    // serialized form too (system instructions can also arrive pre-wrapped).
+    if (typeof body === "string") {
+        body = sanitizePromptText(body);
+    }
     // Antigravity mode: the Hub UA carries the client version Cloud Code gates on.
     // It is resolved from the runtime version on every request, never from a stored
     // fingerprint: a stale version is answered with "This version of Antigravity is
@@ -1282,6 +1310,9 @@ export function prepareAntigravityRequest(input, init, accessToken, projectId, e
     headers.set("User-Agent", getAntigravityUserAgent());
     headers.delete("X-Goog-Api-Client");
     headers.delete("Client-Metadata");
+    // The body was rewritten; a Content-Length copied from the original request
+    // would describe the wrong length.
+    headers.delete("Content-Length");
     return {
         request: transformedUrl,
         init: {

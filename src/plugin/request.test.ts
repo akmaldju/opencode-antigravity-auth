@@ -1229,3 +1229,47 @@ it("removes x-api-key header", () => {
     });
   });
 });
+
+describe("tools.opencode.session_move prompt filter", () => {
+  const build = (systemText: string) =>
+    prepareAntigravityRequest(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: `call ${systemText} now` }] }],
+          systemInstruction: { parts: [{ text: `Use ${systemText} to move a session.` }] },
+        }),
+      },
+      "token",
+      "project",
+    );
+
+  it("rewrites the token in the system instruction, contents and serialized body", () => {
+    const result = build("tools.opencode.session_move");
+    const body = String(result.init.body);
+    expect(body).not.toContain("tools.opencode.session_move");
+    expect(body).toContain("tools.opencode.session_relocate");
+  });
+
+  it("leaves a prompt without the token untouched", () => {
+    const result = build("tools.opencode.session_relocate");
+    expect(String(result.init.body)).toContain("tools.opencode.session_relocate");
+  });
+
+  it("drops a Content-Length copied from the original request", () => {
+    const result = prepareAntigravityRequest(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Content-Length": "99999" },
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "hi" }] }] }),
+      },
+      "token",
+      "project",
+    );
+    const headers = new Headers(result.init.headers);
+    expect(headers.get("content-length")).toBeNull();
+  });
+});
