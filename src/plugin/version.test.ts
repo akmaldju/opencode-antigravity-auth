@@ -31,8 +31,8 @@ describe("ANTIGRAVITY_VERSION_FALLBACK", () => {
   })
 
   it("is at or above the Cloud Code minimum version", async () => {
-    const { ANTIGRAVITY_MINIMUM_VERSION, isSupportedAntigravityVersion } = await import("./version.ts")
-    const { ANTIGRAVITY_VERSION_FALLBACK } = await import("../constants.ts")
+    const { isSupportedAntigravityVersion } = await import("./version.ts")
+    const { ANTIGRAVITY_MINIMUM_VERSION, ANTIGRAVITY_VERSION_FALLBACK } = await import("../constants.ts")
     expect(isSupportedAntigravityVersion(ANTIGRAVITY_VERSION_FALLBACK)).toBe(true)
     expect(isSupportedAntigravityVersion(ANTIGRAVITY_MINIMUM_VERSION)).toBe(true)
   })
